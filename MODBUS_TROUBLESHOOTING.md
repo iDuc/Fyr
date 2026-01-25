@@ -105,7 +105,7 @@ Try slave IDs: 1, 2, 3, 207
 # Using modpoll (brew install libmodbus)
 for SLAVE in 1 2 3 207; do
   echo "Testing slave $SLAVE..."
-  modpoll -m tcp -a $SLAVE -r 203 -c 1 10.0.1.62
+  modpoll -m tcp -a $SLAVE -r 203 -c 1 <BRIDGE_IP>
 done
 ```
 
@@ -119,10 +119,10 @@ Test both address conventions:
 
 ```bash
 # Read status register with modpoll
-modpoll -m tcp -a 2 -r 203 -c 5 10.0.1.62
+modpoll -m tcp -a 2 -r 203 -c 5 <BRIDGE_IP>
 
 # Try alternative addressing
-modpoll -m tcp -a 2 -r 204 -c 5 10.0.1.62
+modpoll -m tcp -a 2 -r 204 -c 5 <BRIDGE_IP>
 ```
 
 ## Sources

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Fyr needs to access your local network to discover and control your DRU fireplace via the Honeywell bridge.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_modbus._tcp</string>
+		<string>_fyr-preflight._tcp</string>
+	</array>
+	<key>INAlternativeAppNames</key>
+	<array>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Fire</string>
+		</dict>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Fier</string>
+		</dict>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Fear</string>
+		</dict>
+	</array>
+</dict>
+</plist>

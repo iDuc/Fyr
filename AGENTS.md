@@ -70,7 +70,9 @@ Homebrew ownership).
 - `DRUFireplaceService` - actor singleton, the only owner of the bridge connection: one gate for connect + rate-limit slot + request, reconnect backoff for automatic polling, idle release (30 s) and `releaseConnection()` (app background, end of every App Intent), flame height "latest wins" coalescing and persistence, `IgnitionAuthorization` required for turning on
 - `BridgeError` - user-facing error states (bridge busy / unreachable / not responding / rejected ...) with recovery suggestions
 - `DRURegisterMap` - registers, `DRUAddressing` (register number / zero-based / one-based), action values, `DRUStatusWord` decoder
-- `DRUDiscovery` - network scanning to find bridge IP (scans 1-254 on local subnet)
+- `DRUDiscovery` - network scanning to find bridge IP (scans 1-254 on local subnet). A host with port 502 open is only accepted after `BridgeProbe` passes
+- `BridgeProbe` - read-only check (function 0x03 of status register 40203, unit 2) that a host is a DRU bridge: the value must look like a DRU status word (bits `0x3800` set, not `0xFFFF`). On exception 0x02 it tries the other addressing conventions (reads only, 3 s apart) and onboarding saves the one that answered
+- `SafetyPolicy` - which commands need what, per surface (`app` / `intent`); see Safety
 
 **Persistence (`Core/Persistence/`):**
 - `SettingsStore` - app-group settings (bridge IP, unit id, addressing) with nonisolated accessors for actors and intents
@@ -105,8 +107,8 @@ Homebrew ownership).
   - Includes compatibility check step before network scan
 
 ### Intents (`Fyr/Intents/`)
-Six Siri App Intents with English and Dutch phrases:
-- TurnOn, TurnOff, SetFlameHeight, SetTemperature, ToggleEcoMode, GetStatus
+App Intents (all `supportedModes = .background`), run through `FireplaceIntentSupport.execute` (configure, confirm if needed, command, always release the connection). `FireplaceEntity` (one fireplace, values from the app-group snapshot, never connects) is returned by Get Status for use in Shortcuts. App Shortcuts (in this order): on, off, wave on, wave off, status, flame height; the thermostat intent is available in Shortcuts but not promoted. Phrases are English in `AppShortcuts.swift`, Dutch as string sets in `Fyr/AppShortcuts.xcstrings`:
+- TurnOn (unlock + confirm), TurnOff, EnableEcoMode / DisableEcoMode (wave on/off), ToggleEcoMode ("Set Wave Mode"), SetFlameHeight, SetTemperature, GetFireplaceStatus. Type names are kept for existing user shortcuts; titles say "wave mode"
 - Dutch terms: "openhaard" (fireplace), "vlammen" (flames), "wave-modus" (eco mode)
 
 ### Widget (`FyrWidget/`)
@@ -148,7 +150,12 @@ Home screen widget extension with:
 - Status bit 9 (`0x0200`) indicates wave mode; the toggle shows the bridge state, with a pending state while a change is in flight
 
 ### Safety
-- Turning off is always allowed. `turnOn(authorization:)` needs an `IgnitionAuthorization`; Siri/Shortcuts currently pass `.unconfirmedIntent` (v1 behaviour). Phase 2: ignition from Siri, Control Center and widgets only with an unlocked device and a confirmation
+Policy in `Core/DRU/SafetyPolicy.swift` (Richard's decision, Oct 2026), tested in `SafetyPolicyTests` / `IntentLogicTests`:
+- **Off** (and wave off) is always allowed, from every surface, also on a locked device, without confirmation.
+- **On, in the app:** only through the swipe-to-ignite slider (`IgnitionAuthorization.appSlider`).
+- **On, from any App Intent** (Siri, Shortcuts, interactive widgets, Control Center / Lock Screen controls, Action button): `TurnOnFireplaceIntent` has `authenticationPolicy = .requiresLocalDeviceAuthentication` (the device running it must be unlocked) and calls `requestConfirmation(actionName: .turnOn, ...)` before connecting. `FireplaceIntentSupport.execute` refuses ignition without a confirmation step (`.ignitionNotAuthorized`). Every future surface must run `TurnOnFireplaceIntent`, never call `turnOn` directly.
+- **Flame height, wave on, thermostat, wave interval:** only while the fire burns. The service reads 40203 under the same gate hold, right before the write, and throws `BridgeError.fireplaceOff` otherwise (checked again on retry). These may run on a locked device.
+- `authenticationPolicy` must be a literal (App Intents metadata); `IntentDeclarationTests` checks each literal against `FireplaceIntentSupport.authenticationPolicy(for:)`
 
 ### Concurrency Model
 Swift 6 language mode (strict concurrency). The app target uses `MainActor` default isolation; core types are `nonisolated`. Network work runs in actors:

@@ -38,6 +38,7 @@ inside a heavy simulator reservation (see the simulator pool section below):
 ```bash
 make build-reserved      # app + widget, generic iOS Simulator, Swift 6
 make test-reserved       # FyrTests on the reserved iOS 27.1 simulator (default: duo)
+make test-ui-reserved    # FyrUITests against a fake bridge on 127.0.0.1 (default: duo)
 make doctor              # environment check (read-only)
 ```
 
@@ -56,7 +57,10 @@ Homebrew ownership).
 
 ## Architecture
 
-### Core Layer (`Fyr/Core/`)
+Code used by both the app and the widget extension lives in `Shared/` (a
+synchronized folder in both targets). App-only code lives in `Fyr/`.
+
+### Shared (`Shared/`, app + widget extension)
 
 **Networking (`Core/Networking/`):**
 - `BridgeTransport` - byte-stream protocol; `NWBridgeTransport` is the Network.framework implementation. `withDeadline` gives real timeouts by closing the transport (NWConnection ignores task cancellation)
@@ -64,57 +68,35 @@ Homebrew ownership).
 - `ModbusTCPClient` - actor; serialized FIFO requests, exact framing (7-byte header, then `length - 1` bytes), transaction-id check (stale frames discarded), connection closed on timeout so late replies can never be misread
 - `RateLimiter` - actor; `tryAcquire` checks and stamps atomically (3 s reads, 3 s writes, 10 s flame height; flame also counts as a write)
 
-**DRU Integration (`Core/DRU/`):**
-- `DRUFireplaceService` - actor singleton, the only owner of the bridge connection: one gate for connect + rate-limit slot + request, reconnect backoff for automatic polling, idle release (30 s) and `releaseConnection()` (app background, end of every App Intent), flame height "latest wins" coalescing and persistence, `IgnitionAuthorization` required for turning on
-- `BridgeError` - user-facing error states (bridge busy / unreachable / not responding / rejected ...) with recovery suggestions
-- `DRURegisterMap` - registers, `DRUAddressing` (register number / zero-based / one-based), action values, `DRUStatusWord` decoder
-- `DRUDiscovery` - network scanning to find bridge IP (scans 1-254 on local subnet). A host with port 502 open is only accepted after `BridgeProbe` passes
-- `BridgeProbe` - read-only check (function 0x03 of status register 40203, unit 2) that a host is a DRU bridge: the value must look like a DRU status word (bits `0x3800` set, not `0xFFFF`). On exception 0x02 it tries the other addressing conventions (reads only, 3 s apart) and onboarding saves the one that answered
-- `SafetyPolicy` - which commands need what, per surface (`app` / `intent`); see Safety
+**DRU (`Core/DRU/`):**
+- `DRUFireplaceService` - actor singleton, the only owner of the bridge connection: one gate for connect + rate-limit slot + request, reconnect backoff for automatic polling, idle release (30 s) and `releaseConnection()` (app background, end of every App Intent), flame height "latest wins" coalescing and persistence, `IgnitionAuthorization` required for turning on. Publishes every status read (`statusSink`) and every accepted command (`commandSink`) to `FyrSurfaces`
+- `BridgeError`, `DRURegisterMap` (registers, `DRUAddressing`, action values, `DRUStatusWord`), `SafetyPolicy` (see Safety)
 
-**Persistence (`Core/Persistence/`):**
-- `SettingsStore` - app-group settings (bridge IP, unit id, addressing) with nonisolated accessors for actors and intents
+**Persistence:** `SettingsStore` - app-group settings with nonisolated accessors for actors and intents.
+**Design System:** `FyrDesign` tokens (see below), Liquid Glass `glassCard`, `DynamicBackground`.
+**Components:** `FlameView` - the drawn fire (Canvas): flickers, rises and falls in wave mode, outline when off; still with Reduce Motion and in widgets (`animated: false`).
+**Models:** `FireplaceStatus` (registers 40203-40207), `FireplaceError`.
+**`FyrShared.swift`:** app group, widget/control kinds, `FireplaceSnapshot` (last known state + `burningSince`, stale after 15 min; `applying(command)` for accepted commands).
 
-**Design System (`Core/DesignSystem/`):**
-- `DesignSystem.swift` - FyrDesign enum with colors, spacing, radius, animation tokens
-- Glass card modifier for iOS 26 liquid glass effects
-- Dynamic background component (warm/cool gradient transitions)
-- Flame color gradient helper based on intensity
+**Surfaces (`Surfaces/`):**
+- `FyrSurfaces` - saves the snapshot and refreshes widgets, controls and the Live Activity, on visible changes or every 5 min (`surfacesPublishedAt`)
+- `FireLiveActivity` - `FireActivityAttributes`; starts the activity when the fire burns (foreground only), updates it, ends it when the fire is off. No push server: it only changes when Fyr talks to the bridge, and carries a stale date
 
-### Models (`Fyr/Models/`)
-- `Fireplace` - Observable model using iOS 17+ Observation framework
-- `FireplaceStatus` - Immutable status snapshots, decoded from registers 40203-40207
-- `FireplaceError` - Error code mapping (F01, F02, etc.)
-
-### Components (`Fyr/Components/`)
-- `FlameIndicator` - Animated flame visualization with eco mode breathing effect
-  - Three sizes: small (80pt), medium (120pt), large (200pt)
-  - Multi-layer glow effects
-  - Eco mode breathing animation (2-second cycle)
-
-### Features (`Fyr/Features/`)
-- `Dashboard/` - Main control interface with liquid glass design
-  - `DashboardView` - Hero layout with dynamic background
-  - `FlameHeightSlider` - Custom slider with eco mode indicator
-  - `TemperatureControl` - Current/target display with presets
-  - `IgnitionSlider` - Swipe-to-ignite with multi-stage haptics
-- `Settings/` - Bridge IP configuration and compatibility info
-  - `SettingsView` - Main settings screen
-  - `CompatibilityView` - Detailed compatible model list with search
-- `Onboarding/` - First-time setup with network scanning wizard
-  - Includes compatibility check step before network scan
-
-### Intents (`Fyr/Intents/`)
-App Intents (all `supportedModes = .background`), run through `FireplaceIntentSupport.execute` (configure, confirm if needed, command, always release the connection). `FireplaceEntity` (one fireplace, values from the app-group snapshot, never connects) is returned by Get Status for use in Shortcuts. App Shortcuts (in this order): on, off, wave on, wave off, status, flame height; the thermostat intent is available in Shortcuts but not promoted. Phrases are English in `AppShortcuts.swift`, Dutch as string sets in `Fyr/AppShortcuts.xcstrings`:
+**Intents (`Intents/`):** all `supportedModes = .background` and `allowedExecutionTargets = .main` (they run in the app process also from widgets and controls, so the bridge connection keeps one owner), run through `FireplaceIntentSupport.execute` (configure, confirm if needed, command, always release the connection). `FireplaceEntity` is returned by Get Status. `SetWaveModeIntent` (`SetValueIntent`, not discoverable) drives the wave toggle in controls, widgets and the Live Activity.
 - TurnOn (unlock + confirm), TurnOff, EnableEcoMode / DisableEcoMode (wave on/off), ToggleEcoMode ("Set Wave Mode"), SetFlameHeight, SetTemperature, GetFireplaceStatus. Type names are kept for existing user shortcuts; titles say "wave mode"
-- Dutch terms: "openhaard" (fireplace), "vlammen" (flames), "wave-modus" (eco mode)
+- Strings: `Shared/Localizable.xcstrings` (en + nl), compiled into both targets
 
-### Widget (`FyrWidget/`)
-Home screen widget extension with:
-- Reads the app-group snapshot only (never connects to the bridge); stale after 15 minutes
-- Glass-style design matching main app
-- Dynamic background (warm when on, cool when off)
-- Flame glow effects and eco mode badge
+### App (`Fyr/`)
+- `App/FyrApp.swift` - creates `Fireplace` and `FireplaceController`; DEBUG `UITestSupport` (`-FyrUITestReset YES`)
+- `Features/Dashboard/` - `DashboardView` (fire and big state first, then on/off, wave, flame height; thermostat tucked away), `DashboardLayout` (one column; two panes split exactly at the iPhone Duo fold via `GeometryProxy.reservedRegions(kind: .division)`; `ArrangementView` `.split` when partly folded; side by side on wide screens; `onHingeChange` in the dashboard), `FireplaceController` (polling 15 s on / 60 s off with backoff, commands), `FireStatusHeader`, `PowerControl` (swipe-to-ignite slider / one-tap off), `WaveModeCard`, `FlameHeightCard`, `ThermostatRow` + sheet
+- `Features/Onboarding/`, `Features/Settings/` (incl. Live Activity switch and the controls explanation), `Core/DRU/DRUDiscovery` + `BridgeProbe` (onboarding only)
+- `Intents/AppShortcuts.swift` + `AppShortcuts.xcstrings` (Dutch phrases); `InfoPlist.xcstrings` (Local Network text, en + nl); `AppIcon.icon` (Icon Composer); `PrivacyInfo.xcprivacy`
+
+### Widget extension (`FyrWidget/`)
+Never connects to the bridge; shows the app-group snapshot.
+- `FyrWidget` - small, medium (interactive: Turn Off, wave toggle), Lock Screen circular / rectangular / inline; StandBy uses the small one. Turn Off is offered whenever the fire is, or may be, burning
+- `FyrControls` - Control Center / Lock Screen / Action button: Fire Off, Wave (toggle), Light Fire (runs `TurnOnFireplaceIntent`: unlock + confirm)
+- `FireLiveActivityWidget` - Lock Screen + Dynamic Island, with Turn Off and wave buttons; says "not confirmed" when stale
 
 ## Key Technical Details
 
@@ -153,6 +135,7 @@ Policy in `Core/DRU/SafetyPolicy.swift` (Richard's decision, Oct 2026), tested i
 - **On, in the app:** only through the swipe-to-ignite slider (`IgnitionAuthorization.appSlider`).
 - **On, from any App Intent** (Siri, Shortcuts, interactive widgets, Control Center / Lock Screen controls, Action button): `TurnOnFireplaceIntent` has `authenticationPolicy = .requiresLocalDeviceAuthentication` (the device running it must be unlocked) and calls `requestConfirmation(actionName: .turnOn, ...)` before connecting. `FireplaceIntentSupport.execute` refuses ignition without a confirmation step (`.ignitionNotAuthorized`). Every future surface must run `TurnOnFireplaceIntent`, never call `turnOn` directly.
 - **Flame height, wave on, thermostat, wave interval:** only while the fire burns. The service reads 40203 under the same gate hold, right before the write, and throws `BridgeError.fireplaceOff` otherwise (checked again on retry). These may run on a locked device.
+- **Widgets, controls, Live Activity:** Turn Off and the wave toggle only; the Light Fire control runs `TurnOnFireplaceIntent`. In the app, VoiceOver users light the fire with the named action "Light the fire", which asks for confirmation first.
 - `authenticationPolicy` must be a literal (App Intents metadata); `IntentDeclarationTests` checks each literal against `FireplaceIntentSupport.authenticationPolicy(for:)`
 
 ### Concurrency Model
@@ -162,38 +145,31 @@ Swift 6 language mode (strict concurrency). The app target uses `MainActor` defa
 ### App Groups
 Uses `group.com.vanYperen.Fyr` for sharing settings and the last status snapshot (`FireplaceSnapshot`, `Shared/FyrShared.swift`) between app and widget
 
-### Tests (`FyrTests/`)
+### Tests (`FyrTests/`, `FyrUITests/`)
+`FyrUITests` start `FakeDRUBridge` (a Modbus server on 127.0.0.1 inside the test runner) and launch the DEBUG app with `-FyrBridgeEndpoint`. Screenshots: `scripts/duo-screenshots.sh` (inside a `duo` reservation) with `scripts/fake-dru-bridge.py`.
+
 Swift Testing, hosted in the app. `Support/FakeBridge` models the bridge (one connection slot, registers, exceptions) with fault injection (silent, late reply, refused, illegal address, busy, stale frame, dropped connection, split replies). `FakeTransport` runs it in-process; `ModbusLoopbackServer` serves it over real TCP on 127.0.0.1 for integration tests and, later, UI tests (`-FyrBridgeEndpoint 127.0.0.1:<port>`, DEBUG builds only).
 
 ## Design System
 
-### Colors (FyrDesign.Colors)
+Scandinavian and quiet, light and dark: birch / soot neutrals, one ember
+accent, fjord blue for wave mode. All colors in `FyrDesign.Colors` adapt to
+the appearance; cards are real Liquid Glass (`glassEffect`).
+
 ```swift
-// Fire palette
-flameYellow, flameOrange, flameRed, ember
-
-// Backgrounds
-warmGradientStart/End (fireplace on)
-coolGradientStart/End (fireplace off)
-
-// Status
-ecoGreen, connected, warning, error
-
-// Glass effects
-glassHighlight, glassBorder, glassBackground
+// Fire (same in both modes): flameYellow, flameOrange, flameRed, ember, glow
+// Accents: accent (ember), wave (fjord blue), waveSubtle
+// Backgrounds: coolGradientStart/End (off), warmGradientStart/End (burning)
+// Status: connected, warning, error
+// Text: textPrimary, textSecondary, textTertiary; hairlines: glassBorder(Subtle)
+// Spacing: xxs 2, xs 4, sm 8, md 16, lg 24, xl 32, xxl 48
+// Animation.spring (0.4 / 0.82), breathing 8 s (one wave cycle)
+// Size.readableWidth 560 (one column on iPad / open Duo)
 ```
 
-### Spacing (FyrDesign.Spacing)
-```swift
-xxs: 2, xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48
-```
-
-### Animation (FyrDesign.Animation)
-```swift
-quick: 0.15s, standard: 0.25s, smooth: 0.35s
-breathing: 2.0s (eco mode), backgroundTransition: 2.0s
-springResponse: 0.35, springDamping: 0.75
-```
+Accessibility: Dynamic Type everywhere (text styles), VoiceOver labels and a
+named ignite action, Reduce Motion stops the flame and background animations,
+haptics on ignite, off, wave, flame steps and hinge changes.
 
 ## Testing Bridge Connectivity
 

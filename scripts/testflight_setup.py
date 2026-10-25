@@ -48,7 +48,14 @@ def main():
             if state != "PROCESSING":
                 break
         else:
-            print(f"build {build_number}: not visible yet", flush=True)
+            # Uploads that fail processing never become builds; say why.
+            uploads = call("GET", f"/v1/apps/{app_id}/buildUploads")["data"]
+            upload = next((u for u in uploads if u["attributes"].get("cfBundleVersion") == build_number), None)
+            upload_state = (upload or {}).get("attributes", {}).get("state", {})
+            if upload_state.get("state") == "FAILED":
+                errors = "; ".join(f"{e.get('code')}: {e.get('description')}" for e in upload_state.get("errors", []))
+                sys.exit(f"build {build_number}: processing FAILED - {errors}")
+            print(f"build {build_number}: upload {upload_state.get('state', 'not visible yet')}", flush=True)
         time.sleep(60)
     if not build or build["attributes"]["processingState"] != "VALID":
         sys.exit(f"build not valid: {build and build['attributes']}")
@@ -81,16 +88,13 @@ def main():
     if any((t["attributes"].get("email") or "").lower() == email.lower() for t in testers):
         print("tester: Richard already in group", flush=True)
     else:
-        existing = call("GET", f"/v1/betaTesters?filter[email]={email}&fields[betaTesters]=email")["data"]
-        if existing:
-            call("POST", f"/v1/betaGroups/{group_id}/relationships/betaTesters",
-                 {"data": [{"type": "betaTesters", "id": existing[0]["id"]}]})
-        else:
-            call("POST", "/v1/betaTesters", {"data": {
-                "type": "betaTesters",
-                "attributes": {"email": email, "firstName": richard["attributes"]["firstName"],
-                               "lastName": richard["attributes"]["lastName"]},
-                "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": group_id}]}}}})
+        # Linking an existing tester record (from another app) to an internal
+        # group returns 409; creating the tester with the group works.
+        call("POST", "/v1/betaTesters", {"data": {
+            "type": "betaTesters",
+            "attributes": {"email": email, "firstName": richard["attributes"]["firstName"],
+                           "lastName": richard["attributes"]["lastName"]},
+            "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": group_id}]}}}})
         print("tester: Richard added", flush=True)
 
     # 5. Build in the group.

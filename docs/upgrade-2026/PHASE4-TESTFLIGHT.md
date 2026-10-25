@@ -1,5 +1,23 @@
 # Phase 4 — TestFlight (25 October 2026)
 
+## Done, 25 October 21:10: Fyr 2.0 (202610252004) in internal TestFlight
+
+- App Group `group.com.vanYperen.Fyr` registered and linked by Richard;
+  archive (Release, automatic signing, app + widget) and upload then worked.
+- Build 202610251951 failed App Store processing: error 90626, "App Intent
+  description cannot contain 'iphone'". Fixed (commit f06d114: "device" /
+  "toestel") and uploaded again as **202610252004**.
+- 202610252004: processing **VALID**, export compliance set (no non-exempt
+  encryption), internal state **IN_BETA_TESTING**, in internal group
+  **Richard** (1 tester: Richard, the Account Holder), Dutch "Wat te testen"
+  (`testflight-notes-nl.txt`).
+- Adding Richard by linking his existing tester record (from another app)
+  returned 409; creating the tester with the group (`POST /v1/betaTesters`)
+  works. `testflight_setup.py` now does that, and stops with Apple's errors
+  when processing fails.
+- Artifacts: `/Volumes/ThunderSloerie/BuildArtifacts/Fyr/archives/Fyr-2.0-202610252004.xcarchive`,
+  `export/Fyr-2.0-202610252004-ipa/Fyr.ipa`, logs in `logs/Fyr-2.0-202610252004/`.
+
 ## Update, 25 October evening: record exists, archive blocked by the App Group
 
 Richard created the record: **Fyr**, id 6826873658, `com.vanYperen.Fyr`,

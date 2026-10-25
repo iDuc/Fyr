@@ -1,13 +1,16 @@
 import AppIntents
 
-/// Intent to set the thermostat temperature
+/// Set the thermostat setpoint. Kept for Shortcuts, not promoted as an App
+/// Shortcut. Only while the fire burns: never lights the fire.
 struct SetTemperatureIntent: AppIntent {
 
     static let title: LocalizedStringResource = "Set Temperature"
 
-    static let description = IntentDescription("Sets the thermostat temperature of the DRU fireplace")
+    static let description = IntentDescription("Sets the thermostat temperature while the DRU fireplace is burning. Does not light the fire.")
 
-    static let openAppWhenRun: Bool = false
+    static let supportedModes: IntentModes = .background
+
+    static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
     /// Temperature parameter (15-30°C)
     @Parameter(
@@ -22,20 +25,14 @@ struct SetTemperatureIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        // Validate temperature
         let clampedTemp = max(15.0, min(30.0, temperature))
-
-        // Format temperature for display
-        let formatter = MeasurementFormatter()
-        formatter.unitOptions = .providedUnit
-        formatter.numberFormatter.maximumFractionDigits = 1
-        let measurement = Measurement(value: clampedTemp, unit: UnitTemperature.celsius)
-        let tempString = formatter.string(from: measurement)
-
-        let dialog = await FireplaceIntentSupport.perform(
+        let tempString = Measurement(value: clampedTemp, unit: UnitTemperature.celsius)
+            .formatted(.measurement(width: .abbreviated, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0...1))))
+        let dialog = try await FireplaceIntentSupport.perform(
+            .setTemperature(clampedTemp),
             success: "Temperature set to \(tempString).",
             failure: String(localized: "Could not set the temperature.")
-        ) { try await $0.setThermostatSetpoint(clampedTemp) }
+        )
         return .result(dialog: dialog)
     }
 }

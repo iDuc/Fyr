@@ -37,10 +37,16 @@ actor RateLimiter {
     /// Record a slot for `kind` if allowed now.
     /// - Returns: `nil` if the slot was granted, otherwise how long to wait.
     func tryAcquire(_ kind: Kind) -> Duration? {
+        tryAcquire([kind])
+    }
+
+    /// Record slots for all `kinds` at once, or none of them.
+    /// - Returns: `nil` if the slots were granted, otherwise how long to wait.
+    func tryAcquire(_ kinds: Set<Kind>) -> Duration? {
         let now = clock.now
-        let wait = remaining(kind, at: now)
+        let wait = kinds.map { remaining($0, at: now) }.max() ?? .zero
         guard wait <= .zero else { return wait }
-        for affected in Self.affectedKinds(kind) {
+        for affected in kinds.flatMap(Self.affectedKinds) {
             lastGrant[affected] = now
         }
         return nil

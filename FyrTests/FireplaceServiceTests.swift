@@ -53,7 +53,7 @@ struct FireplaceServiceTests {
 
     @Test func flameHeightIsPersisted() async throws {
         let store = MemoryFlameHeightStore()
-        let first = await ServiceHarness(store: store)
+        let first = await ServiceHarness(bridge: .burning(), store: store)
         try await first.service.setFlameHeight(70)
         #expect(await first.bridge.flameHeightTarget == 70)
         #expect(store.load() == 70)
@@ -67,14 +67,14 @@ struct FireplaceServiceTests {
     }
 
     @Test func flameHeightIsClamped() async throws {
-        let harness = await ServiceHarness()
+        let harness = await ServiceHarness(bridge: .burning())
         try await harness.service.setFlameHeight(150)
         #expect(await harness.bridge.flameHeightTarget == 100)
     }
 
     @Test func flameHeightLimitHoldsAndLatestValueWins() async throws {
         let interval = Duration.milliseconds(400)
-        let harness = await ServiceHarness(configuration: TestTiming.service(
+        let harness = await ServiceHarness(bridge: .burning(), configuration: TestTiming.service(
             rateLimits: .init(read: .milliseconds(10), write: .milliseconds(10), flameHeight: interval)
         ))
         let service = harness.service
@@ -99,7 +99,7 @@ struct FireplaceServiceTests {
 
     @Test func concurrentFlameChangesCannotBypassTheLimit() async throws {
         let interval = Duration.milliseconds(300)
-        let harness = await ServiceHarness(configuration: TestTiming.service(
+        let harness = await ServiceHarness(bridge: .burning(), configuration: TestTiming.service(
             rateLimits: .init(read: .milliseconds(10), write: .milliseconds(10), flameHeight: interval)
         ))
         let service = harness.service
@@ -116,7 +116,7 @@ struct FireplaceServiceTests {
     }
 
     @Test func turnOffIsNotHeldUpByFlameCooldown() async throws {
-        let harness = await ServiceHarness(configuration: TestTiming.service(
+        let harness = await ServiceHarness(bridge: .burning(), configuration: TestTiming.service(
             rateLimits: .init(read: .milliseconds(10), write: .milliseconds(50), flameHeight: .seconds(5))
         ))
         try await harness.service.setFlameHeight(50)

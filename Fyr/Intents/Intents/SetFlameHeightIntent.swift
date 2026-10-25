@@ -1,20 +1,21 @@
 import AppIntents
 
-/// Intent to set the flame height
-/// Users specify height as a percentage (0-100)
+/// Set the flame height (0-100 %). Only while the fire burns: never lights the fire.
 struct SetFlameHeightIntent: AppIntent {
 
     static let title: LocalizedStringResource = "Set Flame Height"
 
-    static let description = IntentDescription("Sets the flame height of the DRU fireplace")
+    static let description = IntentDescription("Sets the flame height while the DRU fireplace is burning. Does not light the fire.")
 
-    static let openAppWhenRun: Bool = false
+    static let supportedModes: IntentModes = .background
 
-    /// Flame height as percentage (0-100)
+    static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+
     @Parameter(
         title: "Percentage",
         description: "Flame height as percentage (0-100)",
         default: 50,
+        inclusiveRange: (0, 100),
         requestValueDialog: IntentDialog("What percentage should the flame be? (0-100)")
     )
     var percentage: Int
@@ -33,10 +34,11 @@ struct SetFlameHeightIntent: AppIntent {
             return .result(dialog: "Please wait \(seconds) seconds before changing the flame height again.")
         }
 
-        let dialog = await FireplaceIntentSupport.perform(
+        let dialog = try await FireplaceIntentSupport.perform(
+            .setFlameHeight(clampedPercentage),
             success: "Flame set to \(clampedPercentage) percent.",
             failure: String(localized: "Could not set the flame height.")
-        ) { try await $0.setFlameHeight(clampedPercentage) }
+        )
         return .result(dialog: dialog)
     }
 }

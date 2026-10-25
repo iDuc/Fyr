@@ -1,23 +1,22 @@
 import AppIntents
 
-/// Intent to enable eco/wave mode - no parameters needed
+/// Turn wave (eco) mode on. Only while the fire burns: never lights the fire.
 struct EnableEcoModeIntent: AppIntent {
 
-    static let title: LocalizedStringResource = "Enable Eco Mode"
+    static let title: LocalizedStringResource = "Turn On Wave Mode"
 
-    static let description = IntentDescription("Enables eco mode on the DRU fireplace")
+    static let description = IntentDescription("Turns on wave mode while the DRU fireplace is burning. Does not light the fire.")
 
-    static let openAppWhenRun: Bool = false
+    static let supportedModes: IntentModes = .background
 
-    static var parameterSummary: some ParameterSummary {
-        Summary("Turn eco mode on")
-    }
+    static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let dialog = await FireplaceIntentSupport.perform(
-            success: "Eco mode is now on. The flame will vary to save energy.",
-            failure: String(localized: "Could not enable eco mode.")
-        ) { try await $0.setWaveMode(enabled: true) }
+        let dialog = try await FireplaceIntentSupport.perform(
+            .setWaveMode(enabled: true),
+            success: "Wave mode is now on.",
+            failure: String(localized: "Could not turn on wave mode.")
+        )
         return .result(dialog: dialog)
     }
 }

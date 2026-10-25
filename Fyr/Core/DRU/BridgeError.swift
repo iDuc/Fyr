@@ -25,6 +25,9 @@ nonisolated enum BridgeError: Error, Equatable, Sendable {
     case rateLimited(retryAfter: Duration)
     /// Lighting the fire from this place is not allowed (see `IgnitionAuthorization`).
     case ignitionNotAuthorized
+    /// The command was not sent because the fire is off, and it must never
+    /// light a fire (flame height, wave mode on, thermostat; see `SafetyPolicy`).
+    case fireplaceOff
     /// The request was cancelled (e.g. the app went to the background).
     case cancelled
 
@@ -78,6 +81,8 @@ extension BridgeError: LocalizedError {
             String(localized: "Please wait \(Int(retryAfter.components.seconds) + 1) seconds")
         case .ignitionNotAuthorized:
             String(localized: "Lighting the fire is not allowed from here")
+        case .fireplaceOff:
+            String(localized: "The fireplace is off")
         case .cancelled:
             String(localized: "Cancelled")
         }
@@ -101,6 +106,8 @@ extension BridgeError: LocalizedError {
             nil
         case .ignitionNotAuthorized:
             String(localized: "Open Fyr to light the fire.")
+        case .fireplaceOff:
+            String(localized: "Turn the fireplace on first.")
         }
     }
 }

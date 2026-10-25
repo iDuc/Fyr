@@ -1,62 +1,52 @@
 import AppIntents
 
-/// Eco mode state for better Siri understanding
+/// Wave mode state, for the Shortcuts action "Set Wave Mode".
 enum EcoModeState: String, AppEnum {
     case on
     case off
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation {
-        "Eco Mode State"
+        "Wave Mode"
     }
 
     static var caseDisplayRepresentations: [EcoModeState: DisplayRepresentation] {
         [
-            .on: DisplayRepresentation(title: "On", subtitle: "Enable eco mode"),
-            .off: DisplayRepresentation(title: "Off", subtitle: "Disable eco mode")
+            .on: DisplayRepresentation(title: "On"),
+            .off: DisplayRepresentation(title: "Off")
         ]
     }
 }
 
-/// Intent to toggle eco/wave mode
+/// Set wave mode on or off (Shortcuts). Turning it on needs a burning fire.
 struct ToggleEcoModeIntent: AppIntent {
 
-    static let title: LocalizedStringResource = "Set Eco Mode"
+    static let title: LocalizedStringResource = "Set Wave Mode"
 
-    static let description = IntentDescription("Enables or disables eco mode on the DRU fireplace")
+    static let description = IntentDescription("Turns wave mode on or off. Turning it on only works while the fireplace is burning.")
 
-    static let openAppWhenRun: Bool = false
+    static let supportedModes: IntentModes = .background
 
-    /// Eco mode state - on or off
+    // Both values are allowed on a locked device: neither can light the fire.
+    static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+
     @Parameter(
         title: "State",
-        description: "Turn eco mode on or off",
         default: .on,
-        requestValueDialog: IntentDialog("Do you want eco mode on or off?")
+        requestValueDialog: IntentDialog("Do you want wave mode on or off?")
     )
     var state: EcoModeState
 
     static var parameterSummary: some ParameterSummary {
-        Switch(\.$state) {
-            Case(.on) {
-                Summary("Turn eco mode on")
-            }
-            Case(.off) {
-                Summary("Turn eco mode off")
-            }
-            DefaultCase {
-                Summary("Set eco mode to \(\.$state)")
-            }
-        }
+        Summary("Set wave mode \(\.$state)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let enable = state == .on
-        let dialog = await FireplaceIntentSupport.perform(
-            success: enable
-                ? "Eco mode is now on. The flame will vary to save energy."
-                : "Eco mode is now off.",
-            failure: String(localized: "Could not change eco mode.")
-        ) { try await $0.setWaveMode(enabled: enable) }
+        let dialog = try await FireplaceIntentSupport.perform(
+            .setWaveMode(enabled: enable),
+            success: enable ? "Wave mode is now on." : "Wave mode is now off.",
+            failure: String(localized: "Could not change wave mode.")
+        )
         return .result(dialog: dialog)
     }
 }

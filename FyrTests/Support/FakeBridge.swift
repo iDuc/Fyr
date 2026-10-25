@@ -71,6 +71,8 @@ actor FakeBridge {
     private(set) var flameHeightTarget: UInt16?
     private(set) var writes: [Write] = []
     private(set) var requestTimes: [ContinuousClock.Instant] = []
+    /// Function code of every request, in order (0x03 read, 0x06 write).
+    private(set) var functionCodes: [UInt8] = []
     private(set) var connectionAttempts = 0
     private(set) var acceptedConnections = 0
     private(set) var openConnections = 0
@@ -81,10 +83,18 @@ actor FakeBridge {
 
     init() {}
 
+    /// A bridge whose fire is already burning.
+    static func burning() async -> FakeBridge {
+        let bridge = FakeBridge()
+        await bridge.setRegister(40203, statusOn)
+        return bridge
+    }
+
     // MARK: - Test helpers
 
     func setFault(_ fault: Fault) { self.fault = fault }
     func setAddressing(_ addressing: DRUAddressing) { self.addressing = addressing }
+    func setUnitId(_ unitId: UInt8) { self.unitId = unitId }
     func setRegister(_ register: UInt16, _ value: UInt16) { registers[register] = value }
     func register(_ register: UInt16) -> UInt16? { registers[register] }
     var statusWord: UInt16 { registers[40203] ?? 0 }
@@ -112,6 +122,7 @@ actor FakeBridge {
     func handle(request: [UInt8]) -> Reply {
         requestTimes.append(clock.now)
         guard request.count >= 8 else { return Reply(closeConnection: true) }
+        functionCodes.append(request[7])
         let tid = UInt16(bigEndianBytes: request[0], request[1])
         let unit = request[6]
         let pdu = Array(request[7...])

@@ -2,22 +2,6 @@ import Foundation
 import os
 import WidgetKit
 
-/// How a request to light the fire was authorized.
-///
-/// Turning the fire *off* never needs one. Turning it *on* requires a value of
-/// this type, so every caller has to state where ignition came from. Phase 2
-/// (safety policy): Siri, Control Center and widgets may only create
-/// `.confirmedIntent` after the device is unlocked and the user confirmed.
-nonisolated enum IgnitionAuthorization: Sendable, Equatable {
-    /// The user completed the swipe-to-ignite slider in the app.
-    case appSlider
-    /// An App Intent that required an unlocked device and asked for confirmation.
-    case confirmedIntent
-    /// Fyr v1 behaviour: Siri/Shortcuts ignite without confirmation.
-    /// Temporary; phase 2 removes this case.
-    case unconfirmedIntent
-}
-
 /// Stores the last flame height Fyr set. Register 40201 is write-only, so this
 /// is the only record of it; it survives app restarts.
 nonisolated protocol FlameHeightStore: Sendable {
@@ -179,25 +163,28 @@ actor DRUFireplaceService {
 
     // MARK: - Commands
 
-    /// Light the fire. Requires an authorization, see `IgnitionAuthorization`.
+    /// Light the fire. Requires an authorization, see `IgnitionAuthorization`
+    /// and `SafetyPolicy`.
     func turnOn(authorization: IgnitionAuthorization) async throws(BridgeError) {
         logger.info("Turn on (\(String(describing: authorization)))")
-        try await writeAction(.mainBurnerOn)
+        try await writeAction(.mainBurnerOn, for: .turnOn)
     }
 
     /// Turn the fire off. Always allowed.
     func turnOff() async throws(BridgeError) {
         logger.info("Turn off")
-        try await writeAction(.fireplaceOff)
+        try await writeAction(.fireplaceOff, for: .turnOff)
     }
 
-    /// Enable or disable wave (eco) mode.
+    /// Enable or disable wave (eco) mode. Enabling needs a burning fire
+    /// (`BridgeError.fireplaceOff` otherwise); disabling is always allowed.
     func setWaveMode(enabled: Bool) async throws(BridgeError) {
-        try await writeAction(enabled ? .waveModeOn : .waveModeOff)
+        try await writeAction(enabled ? .waveModeOn : .waveModeOff, for: .setWaveMode(enabled: enabled))
     }
 
-    /// Set the flame height (0-100 %). At most one change per 10 s is sent;
-    /// while waiting, a newer request replaces an older one ("latest wins").
+    /// Set the flame height (0-100 %). Needs a burning fire. At most one change
+    /// per 10 s is sent; while waiting, a newer request replaces an older one
+    /// ("latest wins").
     /// - Returns: `false` if a newer request superseded this one.
     @discardableResult
     func setFlameHeight(_ height: Int) async throws(BridgeError) -> Bool {
@@ -208,7 +195,8 @@ actor DRUFireplaceService {
 
         // A retry (after a lost connection) still waits for its own 10 s slot.
         let sent: Void? = try await perform(.flameHeight, priority: .userInitiated, attempts: 2,
-                                     shouldProceed: { self.flameHeightGeneration == generation }) { client in
+                                            requiresBurningFire: SafetyPolicy.requiresBurningFire(.setFlameHeight(clamped)),
+                                            shouldProceed: { self.flameHeightGeneration == generation }) { client in
             try await client.writeSingleRegister(address: address, value: UInt16(clamped))
         }
         guard sent != nil else {
@@ -220,17 +208,17 @@ actor DRUFireplaceService {
         return true
     }
 
-    /// Set the thermostat setpoint in °C.
+    /// Set the thermostat setpoint in °C. Needs a burning fire.
     func setThermostatSetpoint(_ temperature: Double) async throws(BridgeError) {
         let clamped = min(DRUConstants.maxTemperature, max(DRUConstants.minTemperature, temperature))
         let value = UInt16((clamped * DRUConstants.temperatureScaleFactor).rounded())
-        try await writeRegister(.thermostatSetpoint, value: value)
+        try await writeRegister(.thermostatSetpoint, value: value, for: .setTemperature(clamped))
     }
 
-    /// Set the wave interval in seconds (1-60).
+    /// Set the wave interval in seconds (1-60). Needs a burning fire.
     func setWaveInterval(_ seconds: Int) async throws(BridgeError) {
         let clamped = min(DRUConstants.maxWaveInterval, max(DRUConstants.minWaveInterval, seconds))
-        try await writeRegister(.waveInterval, value: UInt16(clamped))
+        try await writeRegister(.waveInterval, value: UInt16(clamped), for: .setWaveInterval(clamped))
     }
 
     /// Time until a flame height change is allowed.
@@ -265,20 +253,24 @@ actor DRUFireplaceService {
 
     // MARK: - Private: requests
 
-    private func writeAction(_ action: DRUAction) async throws(BridgeError) {
-        try await writeRegister(.action, value: action.rawValue)
+    private func writeAction(_ action: DRUAction, for command: FireplaceCommand) async throws(BridgeError) {
+        try await writeRegister(.action, value: action.rawValue, for: command)
     }
 
-    private func writeRegister(_ register: DRURegister, value: UInt16) async throws(BridgeError) {
+    private func writeRegister(_ register: DRURegister, value: UInt16, for command: FireplaceCommand) async throws(BridgeError) {
         let address = configuration.addressing.pduAddress(for: register)
         // Commands are idempotent (absolute values), so one retry after a lost
         // connection is safe; it still waits for its own rate-limit slot.
-        _ = try await perform(.write, priority: .userInitiated, attempts: 2) { client in
+        _ = try await perform(.write, priority: .userInitiated, attempts: 2,
+                              requiresBurningFire: SafetyPolicy.requiresBurningFire(command)) { client in
             try await client.writeSingleRegister(address: address, value: value)
         }
     }
 
     /// Run one bridge request: gate -> connect -> rate-limit slot -> request.
+    /// - Parameter requiresBurningFire: read the status register first, under
+    ///   the same gate hold, and refuse with `BridgeError.fireplaceOff` unless
+    ///   the fire burns. Checked again on every retry.
     /// - Parameter shouldProceed: checked before every attempt; returning false
     ///   abandons the request (used to coalesce flame height changes).
     /// - Returns: The result, or nil if `shouldProceed` returned false.
@@ -286,11 +278,14 @@ actor DRUFireplaceService {
         _ kind: RateLimiter.Kind,
         priority: Priority,
         attempts: Int,
+        requiresBurningFire: Bool = false,
         shouldProceed: () -> Bool = { true },
         _ request: @escaping @Sendable (ModbusTCPClient) async throws -> T
     ) async throws(BridgeError) -> T? {
         defer { scheduleIdleRelease() }
         var attempt = 0
+        // The burning check is a read, so it needs a read slot as well.
+        let kinds: Set<RateLimiter.Kind> = requiresBurningFire ? [kind, .read] : [kind]
 
         while true {
             guard shouldProceed() else { return nil }
@@ -310,7 +305,7 @@ actor DRUFireplaceService {
             guard shouldProceed() else { leaveGate(); return nil }
 
             // Check the slot only now, right before sending, while holding the gate.
-            if let wait = await rateLimiter.tryAcquire(kind) {
+            if let wait = await rateLimiter.tryAcquire(kinds) {
                 leaveGate()
                 do {
                     try await Task.sleep(for: wait)
@@ -321,29 +316,59 @@ actor DRUFireplaceService {
             }
 
             attempt += 1
+            var result: T?
+            let burning: Bool
             do {
-                let result = try await request(client)
-                leaveGate()
-                return result
+                if requiresBurningFire {
+                    burning = try await fireIsBurning(client)
+                } else {
+                    burning = true
+                }
+                if burning {
+                    result = try await request(client)
+                }
             } catch {
-                let modbusError = (error as? ModbusError) ?? .connectionClosed
-                if modbusError.invalidatesConnection {
-                    await closeClient()
-                }
-                leaveGate()
-
-                if error is CancellationError || Task.isCancelled {
-                    throw .cancelled
-                }
-                let bridgeError = BridgeError(modbusError)
-                let retryable = bridgeError == .connectionLost || bridgeError == .deviceBusy || bridgeError == .noResponse
-                guard retryable, attempt < attempts else {
-                    logger.error("Request failed: \(modbusError.description)")
-                    throw bridgeError
-                }
-                logger.info("Retrying after \(modbusError.description)")
+                try await recover(from: error, attempt: attempt, attempts: attempts)
+                continue
             }
+            leaveGate()
+            guard burning, let result else {
+                logger.notice("Not sent: the fire is off")
+                throw .fireplaceOff
+            }
+            return result
         }
+    }
+
+    /// Read the status register. Call while holding the gate.
+    private func fireIsBurning(_ client: ModbusTCPClient) async throws -> Bool {
+        let address = configuration.addressing.pduAddress(for: .status)
+        let word = DRUStatusWord(rawValue: try await client.readHoldingRegisters(address: address, count: 1)[0])
+        if word.isOn {
+            try await Task.sleep(for: configuration.registerReadGap)
+        }
+        return word.isOn
+    }
+
+    /// Handle a failed request attempt: close a broken connection, leave the
+    /// gate, and either return (retry) or throw the user-facing error.
+    private func recover(from error: any Error, attempt: Int, attempts: Int) async throws(BridgeError) {
+        let modbusError = (error as? ModbusError) ?? .connectionClosed
+        if modbusError.invalidatesConnection {
+            await closeClient()
+        }
+        leaveGate()
+
+        if error is CancellationError || Task.isCancelled {
+            throw .cancelled
+        }
+        let bridgeError = BridgeError(modbusError)
+        let retryable = bridgeError == .connectionLost || bridgeError == .deviceBusy || bridgeError == .noResponse
+        guard retryable, attempt < attempts else {
+            logger.error("Request failed: \(modbusError.description)")
+            throw bridgeError
+        }
+        logger.info("Retrying after \(modbusError.description)")
     }
 
     /// Returns a connected client. Call while holding the gate.

@@ -6,10 +6,9 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 Fyr is an iOS app to control DRU fireplaces via ModbusTCP, with Siri integration and home screen widgets. It's a 100% local solution with no cloud services.
 
-**Tech Stack:** Swift 6.0, SwiftUI, iOS 26.0+, Xcode 17.0+
+**Tech Stack:** Swift 6 language mode, SwiftUI, iOS 27.1+, Xcode 27.1
 
-**Local Mac mini:** `/Applications/Xcode.app` is installed and currently reports
-Xcode 26.3 (`17C529`). The project was generated with Xcode tools 26.2.
+**Local Mac mini:** Xcode 27.1 at `/Applications/Xcode.app`.
 
 ## Compatibility
 
@@ -35,83 +34,46 @@ For detailed compatibility information, see [COMPATIBILITY.md](COMPATIBILITY.md)
 
 ## Build Commands
 
-```bash
-# Check this Mac/Codex environment before building
-make doctor
-
-# One-time machine setup for this Mac mini
-make bootstrap
-
-# Build the project
-make build
-
-# Build and run tests (tests directory exists but is currently empty)
-make test
-
-# Full Codex readiness gate
-make verify
-
-# Clean build
-make clean
-
-# Direct xcodebuild wrapper when custom arguments are needed
-scripts/xcodebuild-fyr.sh -project Fyr.xcodeproj -scheme Fyr -destination 'platform=iOS Simulator,name=iPhone 17' build
-```
-
-On this Mac mini, Xcode is installed at `/Applications/Xcode.app`, while
-`xcode-select` may point at Command Line Tools. Use `make` or
-`scripts/xcodebuild-fyr.sh` so `DEVELOPER_DIR` is set correctly per command.
-For a one-time machine setup or after Xcode updates, run:
+On SloerieServer (the shared Mac mini), always run native builds and tests
+inside a heavy simulator reservation (see the simulator pool section below):
 
 ```bash
-make bootstrap
+make build-reserved      # app + widget, generic iOS Simulator, Swift 6
+make test-reserved       # FyrTests on the reserved iOS 27.1 simulator (default: duo)
+make doctor              # environment check (read-only)
 ```
 
-The bootstrap asks for sudo once, then configures `xcode-select`, accepts the
-Xcode license, runs Xcode first-launch setup, repairs Homebrew ownership if
-needed, installs required `libmodbus`/`xcbeautify` tooling when missing, and reruns
-`make doctor`.
+`make build` / `make test` run the same commands without a reservation (for
+other Macs). `make test` needs `TEST_DESTINATION=id=<udid>` or `SIMULATOR_UDID`.
+DerivedData lives in `/Volumes/ThunderSloerie/BuildArtifacts/Fyr/DerivedData`;
+builds use `-jobs 2` and tests run without parallel clones.
 
-See `docs/CODEX_SETUP.md` for the local setup checklist and final health gates.
+The minimum iOS version is 27.1, so tests need an iOS 27.1 simulator; on the
+mini that is the shared `duo` device. Never use the "iPhone 18 Pro" /
+"KoE Tests" device (`test-iphone`) for Fyr.
 
-If doing the setup manually, the required system-level commands are:
-
-```bash
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-sudo DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -license accept
-sudo DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -runFirstLaunch
-```
-
-Required local tools for this Mac mini baseline:
-
-```bash
-sudo chown -R "$(id -un)" /opt/homebrew
-brew install libmodbus xcbeautify
-```
-
-The project includes a shared `Fyr` scheme under
-`Fyr.xcodeproj/xcshareddata/xcschemes/` so CLI builds do not depend on local
-Xcode user data.
+Do not run `scripts/bootstrap-mac-mini.sh` on the shared mini: it makes
+machine-wide changes (`sudo xcode-select`, `xcodebuild -runFirstLaunch`,
+Homebrew ownership).
 
 ## Architecture
 
 ### Core Layer (`Fyr/Core/`)
 
 **Networking (`Core/Networking/`):**
-- `ModbusTCPClient` - Actor-based TCP client using Network.framework for ModbusTCP protocol
-- Supports function codes: Read Holding Registers (0x03), Write Single (0x06), Write Multiple (0x10)
-- Uses MBAP headers with proper transaction IDs
-- Post-connection delay: 1500ms for DRU bridge readiness
-- Keepalive interval: 30s for connection health monitoring
+- `BridgeTransport` - byte-stream protocol; `NWBridgeTransport` is the Network.framework implementation. `withDeadline` gives real timeouts by closing the transport (NWConnection ignores task cancellation)
+- `ModbusProtocol` - pure MBAP/PDU framing: Read Holding Registers (0x03) and Write Single Register (0x06) only
+- `ModbusTCPClient` - actor; serialized FIFO requests, exact framing (7-byte header, then `length - 1` bytes), transaction-id check (stale frames discarded), connection closed on timeout so late replies can never be misread
+- `RateLimiter` - actor; `tryAcquire` checks and stamps atomically (3 s reads, 3 s writes, 10 s flame height; flame also counts as a write)
 
 **DRU Integration (`Core/DRU/`):**
-- `DRUFireplaceService` - Singleton actor service that wraps ModbusTCPClient
-- `DRURegisterMap` - Register addresses and constants for Honeywell BRDG-03EM01 bridge
-- `DRUDiscovery` - Network scanning to find bridge IP (scans 1-254 on local subnet)
-- `RateLimiter` - Enforces rate limits (3s for reads, 10s for flame height changes)
+- `DRUFireplaceService` - actor singleton, the only owner of the bridge connection: one gate for connect + rate-limit slot + request, reconnect backoff for automatic polling, idle release (30 s) and `releaseConnection()` (app background, end of every App Intent), flame height "latest wins" coalescing and persistence, `IgnitionAuthorization` required for turning on
+- `BridgeError` - user-facing error states (bridge busy / unreachable / not responding / rejected ...) with recovery suggestions
+- `DRURegisterMap` - registers, `DRUAddressing` (register number / zero-based / one-based), action values, `DRUStatusWord` decoder
+- `DRUDiscovery` - network scanning to find bridge IP (scans 1-254 on local subnet)
 
 **Persistence (`Core/Persistence/`):**
-- `SettingsStore` - UserDefaults wrapper with App Groups for widget data sharing
+- `SettingsStore` - app-group settings (bridge IP, unit id, addressing) with nonisolated accessors for actors and intents
 
 **Design System (`Core/DesignSystem/`):**
 - `DesignSystem.swift` - FyrDesign enum with colors, spacing, radius, animation tokens
@@ -121,7 +83,7 @@ Xcode user data.
 
 ### Models (`Fyr/Models/`)
 - `Fireplace` - Observable model using iOS 17+ Observation framework
-- `FireplaceStatus` - Immutable status snapshots
+- `FireplaceStatus` - Immutable status snapshots, decoded from registers 40203-40207
 - `FireplaceError` - Error code mapping (F01, F02, etc.)
 
 ### Components (`Fyr/Components/`)
@@ -149,6 +111,7 @@ Six Siri App Intents with English and Dutch phrases:
 
 ### Widget (`FyrWidget/`)
 Home screen widget extension with:
+- Reads the app-group snapshot only (never connects to the bridge); stale after 15 minutes
 - Glass-style design matching main app
 - Dynamic background (warm when on, cool when off)
 - Flame glow effects and eco mode badge
@@ -156,44 +119,46 @@ Home screen widget extension with:
 ## Key Technical Details
 
 ### ModbusTCP Communication
-- **Port:** 502
-- **Slave ID:** 2
+- **Port:** 502, **unit (slave) id:** 2
+- **Addressing:** Fyr sends the register number as PDU address (40203 -> 40203), as v1 and the Homey app do. `DRUAddressing` also supports 40203 -> 202 and 40203 -> 203; confirm with a read-only register dump (`scripts/modbus-readonly-dump.py`), never by writing
 - **Key Registers:**
-  - 40200: Action register (write) - command values such as 101 on, 3 off, 105 wave on, 7 wave off
-  - 40201: Flame height target (write) - percentage 0-100
-  - 40203-40207: Status registers (read) - status bits, error code, flame height, RSSI, temperature
-  - 40250: Thermostat setpoint (read/write)
+  - 40200: Action register (write) - 101 on, 3 off, 105 wave on, 7 wave off
+  - 40201: Flame height target (write-only) - percentage 0-100; Fyr persists the last value it set
+  - 40203: Status bit field (read) - `0x3C00` off, `0xB804` on, bit 9 (`0x0200`) wave mode
+  - 40204-40207: error code, gateway RSSI, fireplace RSSI (x -0.5 dBm), temperature (0.1 °C)
   - 40220: Wave interval (1-60 seconds)
+  - 40250: Thermostat setpoint (0.1 °C)
 
-### Connection Stability
-- Post-connection delay: 1500ms (increased for DRU bridge)
-- Polling interval: 15s with exponential backoff on failures
-- Backoff max: 60s after 4+ consecutive failures
-- Polling jitter: ±2s to prevent thundering herd
-- Command timeout: 30s
-- Retry count: 3 attempts before failure
+### Connection Lifecycle
+- The bridge accepts **one TCP connection**; the official DRU app must be able to connect, so Fyr releases it in the background, after 30 s idle and after every App Intent
+- Connect timeout 5 s, request timeout 5 s, post-connect delay 1.5 s
+- Status fetch reads 40203-40207 one register at a time; reads retry once, general writes retry once (values are absolute), flame height never retries
+- Dashboard polling: 15 s when on, 60 s when off, backoff to 60 s on failures, ±2 s jitter; driven by `.task(id: scenePhase)`
+- Failed connects back off exponentially (2 s ... 60 s) for automatic polling; user commands always try
 
 ### Rate Limiting
-- **Reads:** 3 seconds minimum (reduced for responsiveness)
-- **Flame height:** 10 seconds minimum (regulatory requirement)
+- **Reads:** 3 seconds minimum between status fetches
 - **General writes:** 3 seconds minimum
-- **Wave pattern EEPROM:** 1x per day (hardware limitation)
+- **Flame height:** 10 seconds minimum (regulatory requirement); enforced inside the request gate, so concurrent callers cannot bypass it
 
-### Eco Mode Behavior
+### Eco (Wave) Mode Behavior
 - Varies flame between low and user-set maximum (slider value)
 - Changing flame height while eco active updates the maximum
 - Register 40220 controls wave interval (1-60 seconds)
-- Status bit 3 (`0x0008`) indicates wave/eco mode active
+- Status bit 9 (`0x0200`) indicates wave mode; the toggle shows the bridge state, with a pending state while a change is in flight
+
+### Safety
+- Turning off is always allowed. `turnOn(authorization:)` needs an `IgnitionAuthorization`; Siri/Shortcuts currently pass `.unconfirmedIntent` (v1 behaviour). Phase 2: ignition from Siri, Control Center and widgets only with an unlocked device and a confirmation
 
 ### Concurrency Model
-All network operations use Swift actors for thread safety:
-- `ModbusTCPClient` is an actor
-- `DRUFireplaceService` is an actor singleton
-- `DRUDiscovery` is an actor
-- `RateLimiter` is an actor
+Swift 6 language mode (strict concurrency). The app target uses `MainActor` default isolation; core types are `nonisolated`. Network work runs in actors:
+- `ModbusTCPClient`, `DRUFireplaceService`, `DRUDiscovery`, `RateLimiter`
 
 ### App Groups
-Uses `group.com.fyr.app` for sharing data between main app and widget
+Uses `group.com.vanYperen.Fyr` for sharing settings and the last status snapshot (`FireplaceSnapshot`, `Shared/FyrShared.swift`) between app and widget
+
+### Tests (`FyrTests/`)
+Swift Testing, hosted in the app. `Support/FakeBridge` models the bridge (one connection slot, registers, exceptions) with fault injection (silent, late reply, refused, illegal address, busy, stale frame, dropped connection, split replies). `FakeTransport` runs it in-process; `ModbusLoopbackServer` serves it over real TCP on 127.0.0.1 for integration tests and, later, UI tests (`-FyrBridgeEndpoint 127.0.0.1:<port>`, DEBUG builds only).
 
 ## Design System
 
@@ -228,12 +193,13 @@ springResponse: 0.35, springDamping: 0.75
 ## Testing Bridge Connectivity
 
 ```bash
-# Check if bridge is reachable
-nc -zv <BRIDGE_IP> 502
-
-# Read registers with modpoll if you have installed it separately
-modpoll -m tcp -a 2 -r 203 -c 5 <BRIDGE_IP>
+# Strictly read-only register dump (function 0x03 only, >=3 s between reads,
+# one connection, closed at the end). Pass the bridge IP; do not commit it.
+python3 -I scripts/modbus-readonly-dump.py <BRIDGE_IP> /tmp/fyr-dump.json
 ```
+
+Never write to the bridge from scripts. The terminal running the dump needs
+macOS Local Network access (System Settings > Privacy & Security > Local Network).
 
 ## Localization
 
@@ -248,8 +214,8 @@ The app supports English and Dutch (Nederlands):
 ## Required Capabilities
 
 When modifying the Xcode project, ensure these are configured:
-- App Groups capability (both main app and widget)
-- Siri capability
+- App Groups capability (both main app and widget): `group.com.vanYperen.Fyr`
+- No Siri entitlement: App Intents / App Shortcuts do not need it
 - Info.plist: `NSLocalNetworkUsageDescription` and `NSBonjourServices` for `_modbus._tcp`
 
 ## Shared SloerieServer simulator pool — 2026-10-01

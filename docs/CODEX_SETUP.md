@@ -8,48 +8,33 @@ This repository is configured for Codex work on the Mac mini at:
 
 ## One-Time Machine Setup
 
-Run this after adding the project to Codex, after Xcode updates, or when
-`make doctor` reports machine-level setup issues:
+**Not on the shared SloerieServer mini.** `scripts/bootstrap-mac-mini.sh` makes
+machine-wide changes (`sudo xcode-select`, Xcode license and first-launch,
+Homebrew ownership) that affect every project and agent on that Mac. The
+`make bootstrap` target was removed for that reason. On a personal Mac you may
+run the script by hand:
 
 ```bash
-make bootstrap
+scripts/bootstrap-mac-mini.sh
 ```
 
-The bootstrap script:
-
-- Selects `/Applications/Xcode.app/Contents/Developer` with `xcode-select`.
-- Accepts the Xcode license.
-- Runs Xcode first-launch setup.
-- Repairs `/opt/homebrew` ownership if needed.
-- Installs required diagnostics/build-log tools: `libmodbus` and `xcbeautify`.
-  `libmodbus` is the Homebrew dependency baseline; the separate `modpoll`
-  CLI is optional and is not provided by Homebrew's `libmodbus` formula.
-- Runs `make doctor` again.
-
-It asks for sudo once at the start.
+It selects Xcode with `xcode-select`, accepts the license, runs first-launch
+setup, repairs `/opt/homebrew` ownership if needed, installs `libmodbus` and
+`xcbeautify`, and reruns `make doctor`. It asks for sudo once at the start.
 
 ## Daily Codex Commands
 
 ```bash
 make doctor
 make list
-make build
-make test
-make verify
+make build-reserved   # on SloerieServer: build inside a heavy simulator reservation
+make test-reserved    # on SloerieServer: FyrTests on the reserved iOS 27.1 simulator
 make clean
 ```
 
-`make build` and `make test` default to:
-
-```bash
-platform=iOS Simulator,name=iPhone 17
-```
-
-Use another simulator when needed:
-
-```bash
-make build DESTINATION='platform=iOS Simulator,name=iPhone 16'
-```
+Builds use `generic/platform=iOS Simulator`; tests need a concrete iOS 27.1
+simulator (`TEST_DESTINATION=id=<udid>` or the reservation's `SIMULATOR_UDID`).
+DerivedData: `/Volumes/ThunderSloerie/BuildArtifacts/Fyr/DerivedData`.
 
 ## Project Context
 
@@ -76,11 +61,8 @@ make verify
 ```
 
 If `make doctor` fails on Xcode license, first-launch, `xcode-select`, or
-Homebrew ownership, rerun:
-
-```bash
-make bootstrap
-```
+Homebrew ownership on the shared mini, ask the machine owner instead of
+running the bootstrap script.
 
 `make doctor` intentionally fails when these are missing, because this Mac mini
 is intended to be a complete Codex workstation for Fyr rather than a partial

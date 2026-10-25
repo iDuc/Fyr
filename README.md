@@ -34,9 +34,9 @@ For the complete list of 27 compatible models, see [COMPATIBILITY.md](COMPATIBIL
 
 ## Requirements
 
-- iOS 26.0+
-- Xcode 17.0+
-- Swift 6.0
+- iOS 27.1+
+- Xcode 27.1
+- Swift 6 language mode
 - DRU fireplace with Honeywell BRDG-03EM01 bridge
 
 ## Xcode Project Setup
@@ -81,14 +81,13 @@ Since the Swift source files are provided without an Xcode project, follow these
 2. Select the Fyr target
 3. Go to "Signing & Capabilities"
 4. Click "+ Capability" → "App Groups"
-5. Add: `group.com.fyr.app`
+5. Add: `group.com.vanYperen.Fyr`
 6. Repeat for the FyrWidget target
 
-### 5. Configure Siri Capability
+### 5. Siri
 
-1. Select the Fyr target
-2. Go to "Signing & Capabilities"
-3. Click "+ Capability" → "Siri"
+No Siri capability is needed: App Intents and App Shortcuts work without the
+SiriKit entitlement.
 
 ### 6. Update Info.plist
 
@@ -107,7 +106,7 @@ Add the following to your Info.plist:
 ### 7. Set Deployment Target
 
 1. Select the Fyr project
-2. Under "General", set Minimum Deployments to iOS 26.0
+2. Under "General", set Minimum Deployments to iOS 27.1
 
 ### 8. Build and Run
 

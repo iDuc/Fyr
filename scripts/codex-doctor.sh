@@ -68,10 +68,10 @@ else
 fi
 
 if command -v xcrun >/dev/null 2>&1 && xcrun simctl list devices available >/dev/null 2>&1; then
-  if xcrun simctl list devices available | grep -q 'iPhone 17'; then
-    pass "iPhone 17 simulator runtime is available"
+  if xcrun simctl list runtimes available | grep -q 'iOS 27\.[1-9]'; then
+    pass "An iOS 27.1+ simulator runtime is available (tests run on a reserved device)"
   else
-    fail "iPhone 17 simulator was not found; install the runtime or set a supported default DESTINATION in the Makefile"
+    fail "No iOS 27.1+ simulator runtime found; Fyr's minimum is iOS 27.1"
   fi
 else
   fail "simctl is not available yet; this usually clears after accepting the Xcode license"
@@ -95,28 +95,28 @@ else
   fail "Info.plist is missing NSLocalNetworkUsageDescription"
 fi
 
-if [[ -f "Fyr/Fyr.entitlements" ]] && grep -q 'group.com.fyr.app' Fyr/Fyr.entitlements; then
+if [[ -f "Fyr/Fyr.entitlements" ]] && grep -q 'group.com.vanYperen.Fyr' Fyr/Fyr.entitlements; then
   pass "Main app App Group entitlement is configured"
 else
   fail "Main app App Group entitlement is missing"
 fi
 
 if [[ -f "Fyr/Fyr.entitlements" ]] && grep -q 'com.apple.developer.siri' Fyr/Fyr.entitlements; then
-  pass "Main app Siri entitlement is configured"
+  fail "Main app has the SiriKit entitlement; App Intents do not need it"
 else
-  fail "Main app Siri entitlement is missing"
+  pass "No SiriKit entitlement (App Intents do not need one)"
 fi
 
-if [[ -f "FyrWidgetExtension.entitlements" ]] && grep -q 'group.com.fyr.app' FyrWidgetExtension.entitlements; then
+if [[ -f "FyrWidgetExtension.entitlements" ]] && grep -q 'group.com.vanYperen.Fyr' FyrWidgetExtension.entitlements; then
   pass "Widget App Group entitlement is configured"
 else
   fail "Widget App Group entitlement is missing"
 fi
 
-if grep -q 'com.apple.ApplicationGroups.iOS' Fyr.xcodeproj/project.pbxproj && grep -q 'com.apple.Siri' Fyr.xcodeproj/project.pbxproj; then
-  pass "Xcode project capabilities include App Groups and Siri"
+if grep -q 'com.apple.ApplicationGroups.iOS' Fyr.xcodeproj/project.pbxproj; then
+  pass "Xcode project capabilities include App Groups"
 else
-  fail "Xcode project capabilities are missing App Groups or Siri"
+  fail "Xcode project capabilities are missing App Groups"
 fi
 
 if command -v brew >/dev/null 2>&1 && brew list --versions libmodbus >/dev/null 2>&1; then
@@ -148,7 +148,7 @@ printf "\n"
 if [[ "$status" -eq 0 ]]; then
   pass "Fyr Codex environment is ready"
 else
-  fail "Fyr Codex environment still needs setup. For machine-level fixes, run: make bootstrap"
+  fail "Fyr Codex environment still needs setup (machine-level fixes: see docs/CODEX_SETUP.md)"
 fi
 
 exit "$status"

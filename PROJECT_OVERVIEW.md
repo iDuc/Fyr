@@ -1,6 +1,6 @@
 # Fyr Project Overview
 
-> *Laatst bijgewerkt: 2 februari 2026*
+> *Laatst bijgewerkt: 25 oktober 2026 (upgrade-2026, fase 1)*
 
 ---
 
@@ -26,14 +26,14 @@ De naam "Fyr" is Noors voor "vuur" — kort, krachtig, en past bij de Scandinavi
 
 | Component | Technologie |
 |-----------|-------------|
-| **Taal** | Swift 6.0 |
+| **Taal** | Swift 6 (language mode 6, strict concurrency) |
 | **UI Framework** | SwiftUI |
-| **Minimum iOS** | iOS 26.0+ |
-| **IDE** | Xcode 17.0+ |
+| **Minimum iOS** | iOS 27.1+ |
+| **IDE** | Xcode 27.1 |
 | **Networking** | Network.framework (native TCP) |
 | **Protocol** | ModbusTCP |
 | **Concurrency** | Swift Actors (thread-safe) |
-| **Persistence** | UserDefaults + App Groups |
+| **Persistence** | UserDefaults + App Group `group.com.vanYperen.Fyr` |
 | **Voice** | App Intents (Siri) |
 | **Design** | iOS 26 Liquid Glass design language |
 
@@ -69,7 +69,7 @@ De Honeywell BRDG-03EM01 bridge spreekt **ModbusTCP** — een industrieel protoc
 |-----------|--------|
 | **Poort** | 502 |
 | **Slave ID** | 2 (standaard, kan afwijken!) |
-| **Function Codes** | 0x03 (read), 0x06 (write single), 0x10 (write multiple) |
+| **Function Codes** | 0x03 (read), 0x06 (write single) |
 
 ### Belangrijke Registers
 
@@ -89,19 +89,19 @@ De Honeywell BRDG-03EM01 bridge spreekt **ModbusTCP** — een industrieel protoc
 
 | Operatie | Minimum interval |
 |----------|------------------|
-| Register reads | 3 seconden |
-| Vlam hoogte wijziging | **10 seconden** (regelgeving!) |
+| Status fetch (reads) | 3 seconden |
+| Vlam hoogte wijziging | **10 seconden** (regelgeving!), nieuwste waarde wint |
 | Algemene writes | 3 seconden |
-| Wave pattern opslaan | **1x per dag** (EEPROM limiet) |
 
 ### Connection Flow
 
 ```
-1. TCP connect naar bridge:502
+1. TCP connect naar bridge:502 (timeout 5s)
 2. Wacht 1500ms (bridge startup delay)
-3. Poll elke 15s met exponential backoff bij fouten
-4. Keepalive elke 30s
-5. Timeout na 30s, retry 3x
+3. Requests één voor één, timeout 5s; bij timeout wordt de verbinding gesloten
+4. Poll elke 15s (aan) / 60s (uit) met backoff bij fouten
+5. Verbinding vrijgeven na 30s idle, op de achtergrond en na elke Siri-actie,
+   zodat de officiële DRU app kan verbinden (de bridge heeft maar 1 verbinding)
 ```
 
 ### Bekende Problemen
@@ -167,7 +167,7 @@ Dit is **nog niet geïmplementeerd**.
 
 ### ⚠️ Onderzocht maar niet opgelost
 
-- **Modbus exception errors** (Illegal Data Address 0x02) — Slave ID en address offset issues zijn gedocumenteerd maar het is onduidelijk of dit opgelost is
+- **Status bits en adressering** — v1 werkte met registernummers (40203) en slave 2. Een read-only register dump (`scripts/modbus-readonly-dump.py`) moet de statusbits bevestigen; zie `docs/upgrade-2026/`
 
 ### ❌ Niet geïmplementeerd
 
@@ -257,7 +257,8 @@ done
 
 ## Quick Links
 
-- **Code:** `/Volumes/DAS_mini/Development/Fyr/`
+- **Code:** `/Volumes/ThunderSloerie/Development/Fyr/`
+- **Upgrade 2026:** `docs/upgrade-2026/AUDIT.md`
 - **GitHub:** [iDuc/Fyr](https://github.com/iDuc/Fyr)
 - **Compatibility:** `COMPATIBILITY.md`
 - **Troubleshooting:** `MODBUS_TROUBLESHOOTING.md`

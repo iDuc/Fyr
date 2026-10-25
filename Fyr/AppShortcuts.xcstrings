@@ -1,0 +1,252 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Change the flame height with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Verander de vlamhoogte met ${applicationName}",
+              "Stel de vlamhoogte in met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Is ${applicationName} on" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Staat ${applicationName} aan"
+            ]
+          }
+        }
+      }
+    },
+    "Is the fireplace on with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Staat de openhaard aan met ${applicationName}",
+              "Brandt de openhaard met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Light the fire with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Steek het vuur aan met ${applicationName}",
+              "Steek de openhaard aan met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Put out the fire with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Doof het vuur met ${applicationName}",
+              "Maak het vuur uit met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Set the flame with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Stel de vlam in met ${applicationName}",
+              "Pas de vlammen aan met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Start ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Start ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Start wave mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Start wave-modus met ${applicationName}",
+              "Schakel wave-modus in met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Status of ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Status van ${applicationName}",
+              "Hoe staat ${applicationName} erbij"
+            ]
+          }
+        }
+      }
+    },
+    "Stop ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Stop ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Stop wave mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Stop wave-modus met ${applicationName}",
+              "Schakel wave-modus uit met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn off ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet ${applicationName} uit",
+              "Doe ${applicationName} uit"
+            ]
+          }
+        }
+      }
+    },
+    "Turn off eco mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet eco-modus uit met ${applicationName}",
+              "Zet de eco-modus uit met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn off the fireplace with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet de openhaard uit met ${applicationName}",
+              "Doe de openhaard uit met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn off wave mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet wave-modus uit met ${applicationName}",
+              "Zet de wave-modus uit met ${applicationName}",
+              "Zet wave uit met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn on ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet ${applicationName} aan",
+              "Doe ${applicationName} aan"
+            ]
+          }
+        }
+      }
+    },
+    "Turn on eco mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet eco-modus aan met ${applicationName}",
+              "Zet de eco-modus aan met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn on the fireplace with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet de openhaard aan met ${applicationName}",
+              "Doe de openhaard aan met ${applicationName}"
+            ]
+          }
+        }
+      }
+    },
+    "Turn on wave mode with ${applicationName}" : {
+      "localizations" : {
+        "nl" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "Zet wave-modus aan met ${applicationName}",
+              "Zet de wave-modus aan met ${applicationName}",
+              "Zet wave aan met ${applicationName}"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

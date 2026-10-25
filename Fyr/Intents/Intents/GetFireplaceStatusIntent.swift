@@ -1,56 +1,57 @@
 import AppIntents
 import SwiftUI
 
-/// Intent to get the current fireplace status
+/// Read the fireplace status from the bridge. Returns the fireplace entity,
+/// so Shortcuts can use it (e.g. "if the fireplace is on").
 struct GetFireplaceStatusIntent: AppIntent {
 
     static let title: LocalizedStringResource = "Get Fireplace Status"
 
-    static let description = IntentDescription("Shows the current status of the DRU fireplace")
+    static let description = IntentDescription("Reads the current status of the DRU fireplace")
 
-    static let openAppWhenRun: Bool = false
+    static let supportedModes: IntentModes = .background
 
-    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some IntentResult & ReturnsValue<FireplaceEntity> & ProvidesDialog & ShowsSnippetView {
         let service = DRUFireplaceService.shared
+        let status: FireplaceStatus
         do {
             try await service.configureFromSettings()
-            let status = try await service.fetchStatus()
+            status = try await service.fetchStatus()
             await service.releaseConnection()
-
-            // Build dialog text
-            let dialogText: String
-            if status.isOn {
-                let formatter = MeasurementFormatter()
-                formatter.unitOptions = .providedUnit
-                formatter.numberFormatter.maximumFractionDigits = 1
-                let temp = Measurement(value: status.currentTemperature, unit: UnitTemperature.celsius)
-                let tempString = formatter.string(from: temp)
-
-                var text = status.flameHeightIsKnown
-                    ? String(localized: "The fireplace is on at \(status.flameHeight) percent with temperature \(tempString).")
-                    : String(localized: "The fireplace is on with temperature \(tempString).")
-                if status.ecoModeActive {
-                    text += " " + String(localized: "Eco mode is active.")
-                }
-                dialogText = text
-            } else {
-                dialogText = String(localized: "The fireplace is currently off.")
-            }
-
-            return .result(
-                dialog: IntentDialog(stringLiteral: dialogText),
-                view: StatusSnippetView(status: status)
-            )
         } catch {
             await service.releaseConnection()
-            return .result(
-                dialog: FireplaceIntentSupport.dialog(
-                    for: error,
-                    failure: String(localized: "Could not get the fireplace status.")
-                ),
-                view: StatusSnippetView(status: nil)
-            )
+            throw FireplaceIntentError(message: FireplaceIntentSupport.message(
+                for: error,
+                failure: String(localized: "Could not get the fireplace status.")
+            ))
         }
+
+        return .result(
+            value: FireplaceEntity(status: status),
+            dialog: IntentDialog(stringLiteral: Self.spokenStatus(status)),
+            view: StatusSnippetView(status: status)
+        )
+    }
+
+    /// What Siri says. The flame height is left out: the bridge does not report it.
+    static func spokenStatus(_ status: FireplaceStatus) -> String {
+        guard status.isOn else {
+            return String(localized: "The fireplace is off.")
+        }
+        let temperature = Measurement(value: status.currentTemperature, unit: UnitTemperature.celsius)
+            .formatted(.measurement(width: .abbreviated, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0...1))))
+        return status.ecoModeActive
+            ? String(localized: "The fireplace is on in wave mode. It is \(temperature).")
+            : String(localized: "The fireplace is on. It is \(temperature).")
+    }
+}
+
+/// An intent failure with a message Siri can say.
+struct FireplaceIntentError: Error, CustomLocalizedStringResourceConvertible {
+    let message: String
+
+    var localizedStringResource: LocalizedStringResource {
+        "\(message)"
     }
 }
 
@@ -74,9 +75,6 @@ struct StatusSnippetView: View {
 
                     if status.isOn {
                         HStack(spacing: 12) {
-                            if status.flameHeightIsKnown {
-                                Label("\(status.flameHeight)%", systemImage: "flame")
-                            }
                             Label(formatTemperature(status.currentTemperature), systemImage: "thermometer.medium")
                         }
                         .font(.subheadline)
@@ -84,7 +82,7 @@ struct StatusSnippetView: View {
                     }
 
                     if status.ecoModeActive {
-                        Label("Eco Mode", systemImage: "leaf")
+                        Label("Wave Mode", systemImage: "leaf")
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
@@ -105,10 +103,7 @@ struct StatusSnippetView: View {
     }
 
     private func formatTemperature(_ temp: Double) -> String {
-        let measurement = Measurement(value: temp, unit: UnitTemperature.celsius)
-        let formatter = MeasurementFormatter()
-        formatter.unitOptions = .providedUnit
-        formatter.numberFormatter.maximumFractionDigits = 1
-        return formatter.string(from: measurement)
+        Measurement(value: temp, unit: UnitTemperature.celsius)
+            .formatted(.measurement(width: .abbreviated, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0...1))))
     }
 }

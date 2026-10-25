@@ -10,6 +10,10 @@ struct SetTemperatureIntent: AppIntent {
 
     static let supportedModes: IntentModes = .background
 
+    // Run in the app process, also from widgets and controls: the bridge's
+    // single connection must have one owner (`DRUFireplaceService.shared`).
+    static let allowedExecutionTargets: ExecutionTargets = .main
+
     static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
     /// Temperature parameter (15-30°C)

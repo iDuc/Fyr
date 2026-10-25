@@ -12,6 +12,10 @@ struct TurnOnFireplaceIntent: AppIntent {
 
     static let supportedModes: IntentModes = .background
 
+    // Run in the app process, also from widgets and controls: the bridge's
+    // single connection must have one owner (`DRUFireplaceService.shared`).
+    static let allowedExecutionTargets: ExecutionTargets = .main
+
     // Must be a literal (App Intents metadata); IntentDeclarationTests checks
     // that it matches FireplaceIntentSupport.authenticationPolicy(for: .turnOn).
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication

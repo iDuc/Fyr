@@ -63,6 +63,7 @@ struct ServiceHarness {
             configuration: configuration,
             flameHeightStore: store,
             statusSink: { _, _ in },
+            commandSink: { _ in },
             makeTransport: { _ in factory.make() }
         )
         await service.configure(endpoint: BridgeEndpoint(host: "fake", port: 502), addressing: configuration.addressing)

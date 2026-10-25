@@ -1,6 +1,5 @@
 import Foundation
 import os
-import WidgetKit
 
 /// Stores the last flame height Fyr set. Register 40201 is write-only, so this
 /// is the only record of it; it survives app restarts.
@@ -64,7 +63,8 @@ actor DRUFireplaceService {
     private var configuration: Configuration
     private let makeTransport: TransportFactory
     private let flameHeightStore: FlameHeightStore
-    private let statusSink: @Sendable (FireplaceStatus, Int?) -> Void
+    private let statusSink: @Sendable (FireplaceStatus, Int?) async -> Void
+    private let commandSink: @Sendable (FireplaceCommand) async -> Void
     private let rateLimiter: RateLimiter
     private let logger = Logger(subsystem: "com.vanYperen.Fyr", category: "DRUService")
     private let clock = ContinuousClock()
@@ -99,12 +99,14 @@ actor DRUFireplaceService {
     init(
         configuration: Configuration = .init(),
         flameHeightStore: FlameHeightStore = AppGroupFlameHeightStore(),
-        statusSink: @escaping @Sendable (FireplaceStatus, Int?) -> Void = DRUFireplaceService.saveSnapshot,
+        statusSink: @escaping @Sendable (FireplaceStatus, Int?) async -> Void = FyrSurfaces.statusRead,
+        commandSink: @escaping @Sendable (FireplaceCommand) async -> Void = FyrSurfaces.commandAccepted,
         makeTransport: @escaping TransportFactory = { NWBridgeTransport(endpoint: $0) }
     ) {
         self.configuration = configuration
         self.flameHeightStore = flameHeightStore
         self.statusSink = statusSink
+        self.commandSink = commandSink
         self.makeTransport = makeTransport
         self.rateLimiter = RateLimiter(intervals: configuration.rateLimits)
         self.lastSetFlameHeight = flameHeightStore.load()
@@ -205,6 +207,7 @@ actor DRUFireplaceService {
         }
         lastSetFlameHeight = clamped
         flameHeightStore.save(clamped)
+        await commandSink(.setFlameHeight(clamped))
         return true
     }
 
@@ -247,7 +250,7 @@ actor DRUFireplaceService {
         }!
 
         let status = FireplaceStatus(registers: values, lastSetFlameHeight: lastSetFlameHeight)
-        statusSink(status, lastSetFlameHeight)
+        await statusSink(status, lastSetFlameHeight)
         return status
     }
 
@@ -265,6 +268,7 @@ actor DRUFireplaceService {
                               requiresBurningFire: SafetyPolicy.requiresBurningFire(command)) { client in
             try await client.writeSingleRegister(address: address, value: value)
         }
+        await commandSink(command)
     }
 
     /// Run one bridge request: gate -> connect -> rate-limit slot -> request.
@@ -466,20 +470,5 @@ actor DRUFireplaceService {
         } else {
             gateWaiters.removeFirst().continuation.resume()
         }
-    }
-
-    // MARK: - Default status sink
-
-    /// Persist the status for the widget and a relaunched app, then reload widgets.
-    static let saveSnapshot: @Sendable (FireplaceStatus, Int?) -> Void = { status, lastSetFlameHeight in
-        FireplaceSnapshot(
-            isOn: status.isOn,
-            ecoModeActive: status.ecoModeActive,
-            lastSetFlameHeight: lastSetFlameHeight,
-            currentTemperature: status.currentTemperature,
-            errorCode: status.rawErrorCode == 0 ? nil : status.rawErrorCode,
-            timestamp: .now
-        ).save()
-        WidgetCenter.shared.reloadTimelines(ofKind: FyrAppGroup.widgetKind)
     }
 }

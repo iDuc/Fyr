@@ -108,6 +108,21 @@ nonisolated enum FireplaceIntentSupport {
         }
     }
 
+    /// Run `command` for a control, widget or Live Activity button: no
+    /// dialog, but a thrown error the system can show. On failure the
+    /// surfaces are refreshed, so a toggle flips back to the known state.
+    static func performForControl(_ command: FireplaceCommand, failure: String) async throws {
+        let outcome = try await execute(
+            command,
+            service: .shared,
+            configure: { service throws(BridgeError) in try await service.configureFromSettings() }
+        )
+        if case .failure(let error) = outcome {
+            FyrSurfaces.reloadAll()
+            throw FireplaceIntentError(message: message(for: error, failure: failure))
+        }
+    }
+
     /// Dialog for a failed command, with the reason and what to do about it.
     static func dialog(for error: any Error, failure: String) -> IntentDialog {
         IntentDialog(stringLiteral: message(for: error, failure: failure))

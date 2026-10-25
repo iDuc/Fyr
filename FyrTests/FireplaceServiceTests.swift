@@ -240,6 +240,7 @@ struct FireplaceServiceTests {
             configuration: TestTiming.service(),
             flameHeightStore: MemoryFlameHeightStore(),
             statusSink: { _, _ in },
+            commandSink: { _ in },
             makeTransport: { _ in FakeTransport(bridge: FakeBridge()) }
         )
         await #expect(throws: BridgeError.notConfigured) { try await service.turnOff() }
@@ -253,6 +254,7 @@ struct FireplaceServiceTests {
             configuration: TestTiming.service(),
             flameHeightStore: MemoryFlameHeightStore(),
             statusSink: { status, _ in published.mutate { $0.append(status) } },
+            commandSink: { _ in },
             makeTransport: { _ in factory.make() }
         )
         await service.configure(endpoint: BridgeEndpoint(host: "fake"))

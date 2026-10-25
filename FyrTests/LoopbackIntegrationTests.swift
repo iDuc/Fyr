@@ -93,7 +93,8 @@ struct LoopbackIntegrationTests {
         let service = DRUFireplaceService(
             configuration: TestTiming.service(),
             flameHeightStore: MemoryFlameHeightStore(),
-            statusSink: { _, _ in }
+            statusSink: { _, _ in },
+            commandSink: { _ in }
         )
         await service.configure(endpoint: server.endpoint)
         try await service.turnOn(authorization: .appSlider)

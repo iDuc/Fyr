@@ -8,7 +8,7 @@ struct TurnOnFireplaceIntent: AppIntent {
 
     static let title: LocalizedStringResource = "Turn On Fireplace"
 
-    static let description = IntentDescription("Lights the DRU fireplace. Asks you to unlock your iPhone and to confirm first.")
+    static let description = IntentDescription("Lights the DRU fireplace. Asks you to unlock your device and to confirm first.")
 
     static let supportedModes: IntentModes = .background
 

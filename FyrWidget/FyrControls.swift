@@ -14,7 +14,7 @@ struct FireplaceControlValue: ControlValueProvider {
 }
 
 /// Control Center / Lock Screen / Action button: turn the fire off. Always
-/// allowed, also on a locked iPhone, no confirmation.
+/// allowed, also on a locked device, no confirmation.
 struct FireOffControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: FyrAppGroup.ControlKind.turnOff, provider: FireplaceControlValue()) { snapshot in
@@ -54,7 +54,7 @@ struct WaveModeControl: ControlWidget {
 }
 
 /// Control Center / Lock Screen / Action button: light the fire. Runs
-/// `TurnOnFireplaceIntent`, so the iPhone must be unlocked and you confirm
+/// `TurnOnFireplaceIntent`, so the device must be unlocked and you confirm
 /// every time, as the safety policy requires.
 struct LightFireControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
@@ -74,6 +74,6 @@ struct LightFireControl: ControlWidget {
             .tint(FyrDesign.Colors.flameOrange)
         }
         .displayName("Light Fire")
-        .description("Lights the fireplace after you unlock your iPhone and confirm.")
+        .description("Lights the fireplace after you unlock your device and confirm.")
     }
 }

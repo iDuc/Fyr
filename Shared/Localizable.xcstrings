@@ -1053,26 +1053,6 @@
         }
       }
     },
-    "Lights the DRU fireplace. Asks you to unlock your iPhone and to confirm first." : {
-      "localizations" : {
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Steekt de DRU openhaard aan. Vraagt eerst om je iPhone te ontgrendelen en te bevestigen."
-          }
-        }
-      }
-    },
-    "Lights the fireplace after you unlock your iPhone and confirm." : {
-      "localizations" : {
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Steekt de openhaard aan nadat je je iPhone hebt ontgrendeld en hebt bevestigd."
-          }
-        }
-      }
-    },
     "Live Activity while burning" : {
       "localizations" : {
         "nl" : {
@@ -2592,6 +2572,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Steek het vuur aan"
+          }
+        }
+      }
+    },
+    "Lights the DRU fireplace. Asks you to unlock your device and to confirm first." : {
+      "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steekt de DRU openhaard aan. Vraagt eerst om je toestel te ontgrendelen en te bevestigen."
+          }
+        }
+      }
+    },
+    "Lights the fireplace after you unlock your device and confirm." : {
+      "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steekt de openhaard aan nadat je je toestel hebt ontgrendeld en hebt bevestigd."
           }
         }
       }

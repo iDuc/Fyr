@@ -1,7 +1,7 @@
 import AppIntents
 
 /// Intent to set the flame height
-/// Users can specify height as a percentage (0-100) or level (0-15)
+/// Users specify height as a percentage (0-100)
 struct SetFlameHeightIntent: AppIntent {
 
     static var title: LocalizedStringResource = "Set Flame Height"
@@ -11,7 +11,6 @@ struct SetFlameHeightIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     /// Flame height as percentage (0-100)
-    /// This maps to internal levels 0-15
     @Parameter(
         title: "Percentage",
         description: "Flame height as percentage (0-100)",
@@ -25,9 +24,7 @@ struct SetFlameHeightIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        // Convert percentage (0-100) to flame level (0-15)
         let clampedPercentage = max(0, min(100, percentage))
-        let flameLevel = Int(round(Double(clampedPercentage) / 100.0 * 15.0))
 
         let service = DRUFireplaceService.shared
         let isConnected = await service.isConnected
@@ -47,7 +44,7 @@ struct SetFlameHeightIntent: AppIntent {
         }
 
         do {
-            try await service.setFlameHeight(flameLevel)
+            try await service.setFlameHeight(clampedPercentage)
             return .result(dialog: "Flame set to \(clampedPercentage) percent.")
         } catch {
             return .result(dialog: "Could not set the flame height. Please check the connection.")

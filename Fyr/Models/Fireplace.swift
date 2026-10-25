@@ -25,7 +25,7 @@ final class Fireplace {
     /// Current measured temperature in °C
     var currentTemperature: Double = 0
 
-    /// Current flame height (0-15)
+    /// Current flame height percentage (0-100)
     var flameHeight: Int = 0
 
     /// Whether eco/wave mode is active

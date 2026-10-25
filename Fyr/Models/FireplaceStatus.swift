@@ -14,7 +14,7 @@ struct FireplaceStatus: Sendable, Equatable {
     /// Current error code, if any
     let errorCode: FireplaceErrorCode?
 
-    /// Current flame height (0-15)
+    /// Current flame height percentage (0-100)
     let flameHeight: Int
 
     /// DFGT signal strength (RSSI)

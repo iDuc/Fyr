@@ -201,3 +201,16 @@ When modifying the Xcode project, ensure these are configured:
 - App Groups capability (both main app and widget)
 - Siri capability
 - Info.plist: `NSLocalNetworkUsageDescription` and `NSBonjourServices` for `_modbus._tcp`
+
+## Shared SloerieServer simulator pool — 2026-10-01
+
+Before Simulator, UI/MCP, native Apple build or test work on SloerieServer,
+read `/Volumes/ThunderSloerie/Development/SloerieServer/docs/simulator-agent-rules.md`
+and use the `sloerie-shared-simulators` skill. Run
+`/Users/kat/.local/bin/sloerie-simulators status`; reserve the exact device with
+`run` or `hold` for the whole operation. Add `--heavy` for builds/tests, use
+existing external DerivedData, at most two compiler jobs and no unnecessary
+parallel test clones. Pass the reserved UDID explicitly to UI/MCP tools.
+Preserve project/account devices, warm caches and all three required runtimes.
+Missing Thunder/mounts/rules must stop work, never trigger internal fallback.
+Existing chats must reread the rules at their next safe boundary.

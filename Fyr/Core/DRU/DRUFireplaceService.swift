@@ -268,7 +268,7 @@ actor DRUFireplaceService {
     }
 
     /// Set flame height
-    /// - Parameter height: Flame height (0-15)
+    /// - Parameter height: Flame height percentage (0-100)
     func setFlameHeight(_ height: Int) async throws {
         let clampedHeight = max(DRUConstants.minFlameHeight, min(DRUConstants.maxFlameHeight, height))
         logger.info("Setting flame height to \(clampedHeight)")

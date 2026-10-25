@@ -4,7 +4,7 @@ A modern iOS app to control DRU fireplaces via ModbusTCP, with full Siri integra
 
 ## Features
 
-- **Full Fireplace Control**: On/off, flame height (0-15), temperature setpoint, eco mode
+- **Full Fireplace Control**: On/off, flame height (0-100%), temperature setpoint, eco mode
 - **Siri Voice Commands**: "Hey Siri, turn on the fireplace"
 - **Home Screen Widget**: Monitor status at a glance
 - **Apple-Native Design**: Minimalistic UI following iOS design language
@@ -164,7 +164,7 @@ After setup, these commands work automatically:
 # Test if bridge is reachable
 nc -zv <BRIDGE_IP> 502
 
-# If you have modpoll installed (brew install libmodbus)
+# If you have modpoll installed separately
 modpoll -m tcp -a 2 -r 203 -c 5 <BRIDGE_IP>
 ```
 
@@ -174,17 +174,18 @@ modpoll -m tcp -a 2 -r 203 -c 5 <BRIDGE_IP>
 
 | Register | Description |
 |----------|-------------|
-| 40200 | Action (write) - 9-bit bitmap |
+| 40200 | Action command values (write) |
+| 40201 | Flame height target (write) - 0-100% |
 | 40203 | Status (read) - 16-bit bitmap |
 | 40204 | Error code (read) |
-| 40205 | Flame height (read) - 0-15 |
+| 40205 | Gateway RSSI |
+| 40206 | Fireplace RSSI |
 | 40207 | Temperature (read) - scaled by 10 |
 | 40250 | Thermostat setpoint (read/write) |
-| 40251 | Flame height target (read/write) |
 
 ### Rate Limiting
 
-- Minimum 10 seconds between register reads
+- Minimum 3 seconds between register reads
 - Minimum 10 seconds between flame height changes (regulatory requirement)
 - Errors must be reset manually via the physical remote control
 

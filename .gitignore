@@ -15,6 +15,9 @@ xcuserdata/
 *.xcuserstate
 *.xcscmblueprint
 *.xcscheme
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/xcshareddata/xcschemes/
+!*.xcodeproj/xcshareddata/xcschemes/*.xcscheme
 
 # Swift Package Manager
 .build/

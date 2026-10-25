@@ -89,6 +89,8 @@ struct OnboardingFlow: View {
                 navigationButtons
                     .padding(FyrDesign.Spacing.lg)
             }
+            // One readable column on wide screens (iPad, the open iPhone Duo).
+            .frame(maxWidth: FyrDesign.Size.readableWidth)
         }
         .animation(.spring(
             response: FyrDesign.Animation.springResponse,
@@ -154,7 +156,7 @@ struct OnboardingFlow: View {
     private var compatibilityStep: some View {
         VStack(spacing: FyrDesign.Spacing.lg) {
             // Hero icon
-            glassHeroIcon(systemName: "checkmark.shield", color: FyrDesign.Colors.ecoGreen, size: 60)
+            glassHeroIcon(systemName: "checkmark.shield", color: FyrDesign.Colors.connected, size: 60)
 
             VStack(spacing: FyrDesign.Spacing.sm) {
                 Text(String(localized: "Before You Start"))
@@ -214,7 +216,7 @@ struct OnboardingFlow: View {
     private func compatibilityRequirementRow(icon: String, title: String, subtitle: String) -> some View {
         HStack(spacing: FyrDesign.Spacing.md) {
             Image(systemName: icon)
-                .foregroundStyle(FyrDesign.Colors.ecoGreen)
+                .foregroundStyle(FyrDesign.Colors.connected)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: FyrDesign.Spacing.xxs) {
@@ -319,8 +321,8 @@ struct OnboardingFlow: View {
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(FyrDesign.Colors.ecoGreen)
-                        .glow(color: FyrDesign.Colors.ecoGreen, radius: 4, intensity: 0.5)
+                        .foregroundStyle(FyrDesign.Colors.connected)
+                        .glow(color: FyrDesign.Colors.connected, radius: 4, intensity: 0.5)
                 }
             }
             .padding(FyrDesign.Spacing.md)
@@ -389,7 +391,7 @@ struct OnboardingFlow: View {
                 }
             } else if case .success = connectionTestResult {
                 // Success state
-                glassHeroIcon(systemName: "checkmark.circle.fill", color: FyrDesign.Colors.ecoGreen, size: 60)
+                glassHeroIcon(systemName: "checkmark.circle.fill", color: FyrDesign.Colors.connected, size: 60)
 
                 VStack(spacing: FyrDesign.Spacing.sm) {
                     Text(String(localized: "Connected!"))
@@ -465,7 +467,7 @@ struct OnboardingFlow: View {
     private var completeStep: some View {
         VStack(spacing: FyrDesign.Spacing.lg) {
             // Hero icon with celebratory glow
-            glassHeroIcon(systemName: "checkmark.seal.fill", color: FyrDesign.Colors.ecoGreen, size: 80)
+            glassHeroIcon(systemName: "checkmark.seal.fill", color: FyrDesign.Colors.connected, size: 80)
 
             VStack(spacing: FyrDesign.Spacing.sm) {
                 Text(String(localized: "All Set!"))

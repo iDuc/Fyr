@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     @State private var showResetConfirmation = false
     @State private var bridgeIPInput: String = ""
+    @State private var liveActivityEnabled = FireLiveActivity.isEnabled
 
     var body: some View {
         ZStack {
@@ -25,6 +26,9 @@ struct SettingsView: View {
                         deviceSection
                     }
 
+                    // Controls, widgets and the Live Activity
+                    surfacesSection
+
                     // Siri & Shortcuts section
                     siriSection
 
@@ -37,14 +41,16 @@ struct SettingsView: View {
                     #endif
                 }
                 .padding(FyrDesign.Spacing.md)
+                .frame(maxWidth: FyrDesign.Size.readableWidth)
+                .frame(maxWidth: .infinity)
             }
         }
         .navigationTitle(String(localized: "Settings"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .confirmationDialog(String(localized: "Reset App?"), isPresented: $showResetConfirmation) {
             Button(String(localized: "Reset"), role: .destructive) {
                 settings.reset()
+                Task { await FireLiveActivity.endAll() }
             }
             Button(String(localized: "Cancel"), role: .cancel) { }
         } message: {
@@ -149,6 +155,51 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Controls & Live Activity Section
+
+    @ViewBuilder
+    private var surfacesSection: some View {
+        VStack(alignment: .leading, spacing: FyrDesign.Spacing.sm) {
+            sectionHeader(String(localized: "Controls & Live Activity"), icon: "switch.2")
+
+            VStack(alignment: .leading, spacing: FyrDesign.Spacing.sm) {
+                Toggle(isOn: Binding(
+                    get: { liveActivityEnabled },
+                    set: { newValue in
+                        liveActivityEnabled = newValue
+                        FireLiveActivity.isEnabled = newValue
+                        Task {
+                            if newValue, let snapshot = settings.loadSnapshot() {
+                                await FireLiveActivity.update(for: snapshot)
+                            } else {
+                                await FireLiveActivity.endAll()
+                            }
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: FyrDesign.Spacing.xxs) {
+                        Text(String(localized: "Live Activity while burning"))
+                            .foregroundStyle(FyrDesign.Colors.textPrimary)
+                        Text(String(localized: "On the Lock Screen and in the Dynamic Island, with an off button. It updates when Fyr talks to the fireplace; after 15 minutes without news it shows the state as unconfirmed."))
+                            .font(.caption)
+                            .foregroundStyle(FyrDesign.Colors.textSecondary)
+                    }
+                }
+                .tint(FyrDesign.Colors.accent)
+                .accessibilityIdentifier("settings.liveActivity")
+
+                Divider()
+                    .background(FyrDesign.Colors.glassBorderSubtle)
+
+                Text(String(localized: "Add Fyr to Control Center, the Lock Screen or the Action button: Fire Off, Wave and Light Fire. Lighting the fire from a control asks you to unlock your iPhone and to confirm."))
+                    .font(.caption)
+                    .foregroundStyle(FyrDesign.Colors.textSecondary)
+            }
+            .padding(FyrDesign.Spacing.md)
+            .glassCard()
+        }
+    }
+
     // MARK: - Siri Section
 
     @ViewBuilder
@@ -183,12 +234,10 @@ struct SettingsView: View {
                         .foregroundStyle(FyrDesign.Colors.textTertiary)
 
                     VStack(alignment: .leading, spacing: FyrDesign.Spacing.xs) {
-                        siriExampleRow("Turn on Fyr")
                         siriExampleRow("Turn off Fyr")
-                        siriExampleRow("Set flame to 50 percent with Fyr")
-                        siriExampleRow("Set temperature with Fyr")
-                        siriExampleRow("Turn eco mode on with Fyr")
-                        siriExampleRow("Status of Fyr")
+                        siriExampleRow("Turn on Fyr")
+                        siriExampleRow("Turn on wave mode with Fyr")
+                        siriExampleRow("Is Fyr on")
                     }
                 }
                 .padding(.vertical, FyrDesign.Spacing.sm)
@@ -203,14 +252,18 @@ struct SettingsView: View {
                         .foregroundStyle(FyrDesign.Colors.textTertiary)
 
                     VStack(alignment: .leading, spacing: FyrDesign.Spacing.xs) {
-                        siriExampleRow("Zet Fyr aan")
                         siriExampleRow("Zet Fyr uit")
-                        siriExampleRow("Zet vlam op 50 procent met Fyr")
-                        siriExampleRow("Zet eco-modus aan met Fyr")
-                        siriExampleRow("Status van Fyr")
+                        siriExampleRow("Zet Fyr aan")
+                        siriExampleRow("Zet wave-modus aan met Fyr")
+                        siriExampleRow("Staat Fyr aan")
                     }
                 }
                 .padding(.vertical, FyrDesign.Spacing.sm)
+
+                Text(String(localized: "Turning on asks you to unlock your iPhone and to confirm. On HomePod and Apple Watch Siri can only turn the fire off."))
+                    .font(.caption)
+                    .foregroundStyle(FyrDesign.Colors.textTertiary)
+                    .padding(.bottom, FyrDesign.Spacing.sm)
 
                 Divider()
                     .background(FyrDesign.Colors.glassBorderSubtle)
@@ -420,7 +473,7 @@ struct SettingsView: View {
         case 0: return .green.opacity(0.7)
         case 1: return .green.opacity(0.85)
         case 2: return .green
-        case 3: return FyrDesign.Colors.ecoGreen
+        case 3: return FyrDesign.Colors.connected
         default: return .green
         }
     }

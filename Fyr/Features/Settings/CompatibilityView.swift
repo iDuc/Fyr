@@ -75,7 +75,7 @@ struct CompatibilityView: View {
     private func requirementRow(icon: String, title: String, description: String) -> some View {
         HStack(alignment: .top, spacing: FyrDesign.Spacing.md) {
             Image(systemName: icon)
-                .foregroundStyle(FyrDesign.Colors.ecoGreen)
+                .foregroundStyle(FyrDesign.Colors.connected)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: FyrDesign.Spacing.xxs) {
@@ -116,7 +116,7 @@ struct CompatibilityView: View {
                 seriesCard(
                     series: "Lugo",
                     models: CompatibilityData.lugoModels,
-                    color: FyrDesign.Colors.ecoGreen
+                    color: FyrDesign.Colors.connected
                 )
             }
         }
@@ -172,7 +172,7 @@ struct CompatibilityView: View {
                             HStack(spacing: FyrDesign.Spacing.sm) {
                                 Image(systemName: "checkmark")
                                     .font(.caption)
-                                    .foregroundStyle(FyrDesign.Colors.ecoGreen)
+                                    .foregroundStyle(FyrDesign.Colors.connected)
 
                                 Text(model)
                                     .font(.subheadline)

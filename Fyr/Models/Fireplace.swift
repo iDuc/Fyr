@@ -34,6 +34,9 @@ final class Fireplace {
     /// Whether eco/wave mode is active
     var ecoModeActive: Bool = false
 
+    /// When Fyr saw the fire being lit (nil if unknown or off)
+    var burningSince: Date?
+
     /// Whether there's an active error
     var hasError: Bool = false
 
@@ -57,8 +60,14 @@ final class Fireplace {
     /// Whether a command is currently being processed
     var isProcessing: Bool = false
 
-    /// Time remaining until flame height can be changed again (seconds)
-    var flameHeightCooldown: TimeInterval = 0
+    /// Flame height the user just asked for, until the bridge accepted it
+    var pendingFlameHeight: Int?
+
+    /// When the next flame height change can be sent (10 s rule)
+    var flameHeightReadyAt: Date?
+
+    /// Whether a status has been read from the bridge in this session
+    var hasLiveStatus: Bool = false
 
     /// Last status update timestamp
     var lastStatusUpdate: Date?
@@ -112,6 +121,7 @@ final class Fireplace {
         errorCode = status.errorCode
         signalStrength = status.signalStrengthPercentage
         lastStatusUpdate = Date()
+        hasLiveStatus = true
         lastError = nil
     }
 
@@ -126,6 +136,7 @@ final class Fireplace {
         if let temperature = snapshot.currentTemperature {
             currentTemperature = temperature
         }
+        burningSince = snapshot.burningSince
         lastStatusUpdate = snapshot.timestamp
     }
 
@@ -154,15 +165,15 @@ extension Fireplace {
         var displayName: String {
             switch self {
             case .disconnected:
-                return "Disconnected"
+                return String(localized: "Disconnected")
             case .connecting:
-                return "Connecting..."
+                return String(localized: "Connecting…")
             case .connected:
-                return "Connected"
+                return String(localized: "Connected")
             case .reconnecting:
-                return "Reconnecting..."
+                return String(localized: "Reconnecting…")
             case .failed(let reason):
-                return "Failed: \(reason)"
+                return String(localized: "Failed: \(reason)")
             }
         }
 

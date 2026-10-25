@@ -5,27 +5,28 @@ import AppIntents
 @main
 struct FyrApp: App {
 
-    // MARK: - State
-
     /// Main fireplace model shared across the app
-    @State private var fireplace = Fireplace()
-
+    @State private var fireplace: Fireplace
+    /// Polls the bridge and sends commands for the dashboard
+    @State private var controller: FireplaceController
     /// Settings store for persisted configuration
     @State private var settings = SettingsStore.shared
 
-    // MARK: - Initialization
-
     init() {
-        // Register App Shortcuts with the system
+        #if DEBUG
+        UITestSupport.prepare()
+        #endif
+        let fireplace = Fireplace()
+        _fireplace = State(initialValue: fireplace)
+        _controller = State(initialValue: FireplaceController(fireplace: fireplace))
         FyrShortcuts.updateAppShortcutParameters()
     }
-
-    // MARK: - Body
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(fireplace)
+                .environment(controller)
                 .environment(settings)
         }
     }
@@ -43,3 +44,21 @@ struct ContentView: View {
         }
     }
 }
+
+#if DEBUG
+/// Hooks for UI tests and screenshots (DEBUG builds only).
+enum UITestSupport {
+    /// `-FyrUITestReset YES`: start without a saved status, flame height or
+    /// Live Activity, so every test sees the same first screen.
+    static let resetArgument = "FyrUITestReset"
+
+    static func prepare() {
+        guard UserDefaults.standard.bool(forKey: resetArgument) else { return }
+        let defaults = FyrAppGroup.defaults
+        for key in [FireplaceSnapshot.storageKey, AppGroupFlameHeightStore.key] {
+            defaults.removeObject(forKey: key)
+        }
+        Task { await FireLiveActivity.endAll() }
+    }
+}
+#endif

@@ -1,0 +1,21 @@
+Fyr 2.0 – nieuw ontwerp, bediening vanuit het bedieningspaneel, widgets en live activiteit.
+
+EERST: stel de bridge opnieuw in. De app-groep is hernoemd, oude instellingen zijn weg (scannen of IP-adres invullen).
+
+VEILIGHEID – controleer op je iPhone:
+1. Vergrendeld: "Hé Siri, zet Fyr uit" → werkt meteen.
+2. Vergrendeld: "Hé Siri, zet Fyr aan" → eerst ontgrendelen, dan "De openhaard nu aansteken?". Zeg "nee": er gebeurt niets.
+3. Herhaal en zeg "ja": het vuur gaat aan.
+4. Vuur uit: "Zet wave-modus aan met Fyr" → "De openhaard staat uit…", het vuur blijft uit.
+5. In de app: aan alleen met de schuifknop, uit met één tik.
+6. Opdrachten: "Status openhaard opvragen" → "Als openhaard aan" werkt als voorwaarde.
+
+BEDIENINGSPANEEL / TOEGANGSSCHERM / ACTIEKNOP: voeg Vuur uit, Wave en Vuur aan toe. Vergrendeld werkt Vuur uit meteen; Vuur aan vraagt ontgrendelen + bevestigen; Wave doet niets als het vuur uit is.
+
+WIDGETS: klein en middel op het beginscherm (Uitzetten, wave), ook in StandBy (iPhone liggend aan de lader), en op het toegangsscherm.
+
+LIVE ACTIVITEIT: verschijnt als je het vuur in de app aansteekt, met Uitzetten en wave. Fyr heeft geen server: hij wordt alleen bijgewerkt als Fyr met de openhaard praat. Zet je het vuur uit met de afstandsbediening of de DRU-app terwijl Fyr dicht is, dan weet hij dat niet; na 15 minuten staat er "Niet bevestigd". Hij start alleen als Fyr open is.
+
+IPHONE DUO (als je hem hebt): dicht één kolom; open twee helften naast de vouw; half gevouwen op tafel vuur boven/links en knoppen ernaast.
+
+Let ook op: de DRU-app moet blijven werken (Fyr laat de verbinding los als je Fyr sluit) en vlamhoogte kan maximaal één keer per 10 seconden veranderen.

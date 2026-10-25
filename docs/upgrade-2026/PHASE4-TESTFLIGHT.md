@@ -1,6 +1,51 @@
 # Phase 4 — TestFlight (25 October 2026)
 
-## Status: stopped at the app record
+## Update, 25 October evening: record exists, archive blocked by the App Group
+
+Richard created the record: **Fyr**, id 6826873658, `com.vanYperen.Fyr`,
+SKU FYR-IOS, primary language **nl-NL** (checked via the API).
+
+Tests before archiving: 115 unit tests and 5 UI tests green on the Duo
+(also on the closed outer display), 0 warnings.
+
+`scripts/testflight.sh upload` (Release, automatic signing, team SZWSVWQSP3)
+fails at signing for app and widget, three times:
+
+- with the API key: "Authentication failed: Make sure a bearer token was
+  provided…", then no profile with the App Groups capability;
+- with Xcode's own account: "No Accounts" (no Apple ID signed in to Xcode on
+  the mini).
+
+Cause: Fyr needs new App Store profiles that include the App Group
+`group.com.vanYperen.Fyr`. Registering an App Group and assigning it to App
+IDs is done by Xcode's developer services; API-key authentication cannot do
+that, and the public App Store Connect API has no App Group endpoints. The
+same key works for KeepOfEchoes, whose group and profiles already existed.
+
+Done already: internal TestFlight group **Richard** (created). Adding
+Richard as tester returned 409 "Tester(s) cannot be assigned"; that is
+retried by `scripts/testflight_setup.py` once a build exists.
+
+### What Richard has to click (developer portal, ~3 minutes)
+
+1. <https://developer.apple.com/account/resources/identifiers/list/applicationGroup> → **+** → App Groups → Description *Fyr*, Identifier **group.com.vanYperen.Fyr** → Register.
+2. Identifiers → **com.vanYperen.Fyr** → App Groups → Configure → tick **group.com.vanYperen.Fyr** → Save (confirm).
+3. Same for **com.vanYperen.Fyr.FyrWidget**.
+
+(Alternatively: sign in to Xcode on the Mac mini once, Settings → Accounts, with the team's Apple ID.)
+
+Then the agent runs, in a heavy reservation:
+
+```bash
+scripts/testflight.sh upload
+python3 -I scripts/testflight_setup.py <build number> docs/upgrade-2026/testflight-notes-nl.txt
+```
+
+The second step waits for processing, sets export compliance, adds Richard
+and the build to the group and sets the Dutch notes
+(`testflight-notes-nl.txt`).
+
+## Earlier status: stopped at the app record
 
 The App Store Connect API cannot create app records. Checked with key
 `QSKWP2WVYV` (team SZWSVWQSP3):

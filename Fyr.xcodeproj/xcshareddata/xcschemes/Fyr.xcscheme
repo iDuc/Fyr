@@ -41,6 +41,17 @@
                ReferencedContainer = "container:Fyr.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F1A000000000000000000101"
+               BuildableName = "FyrUITests.xctest"
+               BlueprintName = "FyrUITests"
+               ReferencedContainer = "container:Fyr.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

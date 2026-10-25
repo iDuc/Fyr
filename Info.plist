@@ -3,12 +3,16 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Fyr needs to access your local network to discover and control your DRU fireplace via the Honeywell bridge.</string>
+	<string>Fyr talks directly to your DRU fireplace's Wi-Fi bridge on your home network, to find it and to turn the fire on or off. Nothing leaves your home.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_modbus._tcp</string>
 		<string>_fyr-preflight._tcp</string>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>INAlternativeAppNames</key>
 	<array>
 		<dict>

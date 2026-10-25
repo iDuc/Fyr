@@ -1,0 +1,24 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Privacy - Local Network Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Fyr talks directly to your DRU fireplace's Wi-Fi bridge on your home network, to find it and to turn the fire on or off. Nothing leaves your home."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fyr praat rechtstreeks met de wifi-bridge van je DRU-openhaard op je thuisnetwerk, om hem te vinden en het vuur aan of uit te zetten. Er gaat niets je huis uit."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

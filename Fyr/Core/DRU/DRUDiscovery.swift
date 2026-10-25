@@ -27,19 +27,32 @@ actor DRUDiscovery {
         }
     }
 
-    /// A discovered bridge on the network
+    /// A DRU bridge found on the network, verified with a read-only probe.
     struct DiscoveredBridge: Identifiable, Sendable {
         let id: String
         let ipAddress: String
         let port: UInt16
         let responseTime: TimeInterval
+        /// Addressing convention the bridge answered to.
+        let addressing: DRUAddressing
 
-        init(ipAddress: String, port: UInt16 = 502, responseTime: TimeInterval = 0) {
+        init(ipAddress: String, port: UInt16 = 502, responseTime: TimeInterval = 0, addressing: DRUAddressing = .default) {
             self.id = ipAddress
             self.ipAddress = ipAddress
             self.port = port
             self.responseTime = responseTime
+            self.addressing = addressing
         }
+    }
+
+    /// Result of checking one address.
+    enum Verification: Sendable {
+        /// A DRU bridge (TCP port open and a plausible status read).
+        case bridge(DiscoveredBridge)
+        /// Port 502 is open but the device does not answer like a DRU bridge.
+        case notADRUBridge
+        /// Nothing usable answered at this address.
+        case unreachable
     }
 
     /// Discovery progress update
@@ -72,9 +85,21 @@ actor DRUDiscovery {
     /// DRU bridge needs significant recovery time after connection attempts
     private let postScanDelay: TimeInterval = 2.0
 
+    /// Pause between the TCP port check and the probe: the bridge has one
+    /// connection slot and needs a moment after the check's connection closed.
+    private let probeDelay: Duration = .seconds(1)
+
+    /// Read-only Modbus check that tells a DRU bridge from other port-502 devices.
+    private let probe: BridgeProbe
+
+    init(probe: BridgeProbe = BridgeProbe()) {
+        self.probe = probe
+    }
+
     // MARK: - Public Methods
 
-    /// Scan the local network for Modbus TCP devices on port 502
+    /// Scan the local network for DRU bridges: hosts with port 502 open that
+    /// pass the read-only `BridgeProbe`
     /// - Parameters:
     ///   - progressHandler: Handler for progress updates
     ///   - stopOnFirstFound: If true, stops scanning after finding the first bridge
@@ -172,8 +197,10 @@ actor DRUDiscovery {
                 return discovered
             }
 
-            // Process results
-            for bridge in results {
+            // Verify each open port with a harmless read, one host at a time.
+            for candidate in results {
+                guard !Task.isCancelled else { break }
+                guard case .bridge(let bridge) = await verifyCandidate(candidate) else { continue }
                 discovered.append(bridge)
                 logger.info("Found bridge at \(bridge.ipAddress) (response: \(String(format: "%.0fms", bridge.responseTime * 1000)))")
                 progressHandler?(.found(bridge))
@@ -205,7 +232,37 @@ actor DRUDiscovery {
         return discovered
     }
 
-    /// Test connection to a specific IP address
+    /// Probe a host whose port 502 is open. Returns it only if it answers
+    /// like a DRU bridge.
+    private func verifyCandidate(_ candidate: DiscoveredBridge) async -> Verification {
+        try? await Task.sleep(for: probeDelay)
+        let endpoint = BridgeEndpoint(host: candidate.ipAddress, port: candidate.port)
+        switch await probe.probe(endpoint) {
+        case .bridge(let addressing, let status):
+            logger.info("\(candidate.ipAddress): DRU status 0x\(String(status, radix: 16)), addressing \(addressing.rawValue)")
+            return .bridge(DiscoveredBridge(
+                ipAddress: candidate.ipAddress,
+                port: candidate.port,
+                responseTime: candidate.responseTime,
+                addressing: addressing
+            ))
+        case .notADRUBridge:
+            logger.info("\(candidate.ipAddress): port 502 open, but not a DRU bridge")
+            return .notADRUBridge
+        case .noAnswer(let error):
+            logger.info("\(candidate.ipAddress): no Modbus answer (\(String(describing: error)))")
+            return .unreachable
+        }
+    }
+
+    /// Check one address completely: TCP port 502 and the read-only probe.
+    func verify(ip: String) async -> Verification {
+        guard let candidate = await testConnection(ip: ip) else { return .unreachable }
+        return await verifyCandidate(candidate)
+    }
+
+    /// Test whether TCP port 502 is open at an IP address. This alone does not
+    /// mean it is a DRU bridge; see `verify(ip:)`.
     /// - Parameter ip: IP address to test
     /// - Returns: DiscoveredBridge if connection successful, nil otherwise
     func testConnection(ip: String) async -> DiscoveredBridge? {
@@ -292,13 +349,11 @@ actor DRUDiscovery {
         return true
     }
 
-    /// Verify a manually entered IP address has a Modbus device
-    /// - Parameter ip: IP address to test
-    /// - Returns: DiscoveredBridge if connection successful, nil otherwise
-    func verifyManualIP(_ ip: String) async -> DiscoveredBridge? {
+    /// Verify that a manually entered IP address is a DRU bridge.
+    func verifyManualIP(_ ip: String) async -> Verification {
         guard isValidIPAddress(ip) else {
             logger.error("Invalid IP address format: \(ip)")
-            return nil
+            return .unreachable
         }
 
         logger.info("Testing manual IP: \(ip)")
@@ -309,10 +364,10 @@ actor DRUDiscovery {
 
         if !hasPermission {
             logger.warning("Cannot verify IP - no network permission")
-            return nil
+            return .unreachable
         }
 
-        return await testConnection(ip: ip)
+        return await verify(ip: ip)
     }
 
     // MARK: - Private Methods

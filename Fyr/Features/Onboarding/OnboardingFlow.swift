@@ -12,6 +12,9 @@ struct OnboardingFlow: View {
     @State private var isScanning = false
     @State private var scanProgress: Double = 0
     @State private var connectionTestResult: ConnectionTestResult?
+    /// Address that answered Modbus but did not pass the DRU check; the user
+    /// may still choose to use it (escape hatch if the check is too strict).
+    @State private var unverifiedIP: String?
     @State private var scanTask: Task<Void, Never>?
 
     enum OnboardingStep: CaseIterable {
@@ -411,6 +414,21 @@ struct OnboardingFlow: View {
                         .foregroundStyle(FyrDesign.Colors.textSecondary)
                         .multilineTextAlignment(.center)
                 }
+
+                if let unverifiedIP {
+                    VStack(spacing: FyrDesign.Spacing.xs) {
+                        Button(String(localized: "Use this address anyway")) {
+                            settings.saveBridge(ip: unverifiedIP, addressing: .default)
+                            self.unverifiedIP = nil
+                            connectionTestResult = .success
+                        }
+                        .buttonStyle(.bordered)
+
+                        Text(String(localized: "Only if you are sure this is your DRU bridge."))
+                            .font(.caption)
+                            .foregroundStyle(FyrDesign.Colors.textSecondary)
+                    }
+                }
             }
         }
     }
@@ -758,21 +776,25 @@ struct OnboardingFlow: View {
         cancelScan()
 
         connectionTestResult = nil
+        unverifiedIP = nil
 
         Task {
             // Add small delay to ensure scan connections are fully closed
             try? await Task.sleep(for: .milliseconds(500))
 
             let discovery = DRUDiscovery()
-            if let result = await discovery.testConnection(ip: bridgeIPToTest) {
-                await MainActor.run {
-                    settings.bridgeIP = result.ipAddress
-                    connectionTestResult = .success
-                }
-            } else {
-                await MainActor.run {
-                    connectionTestResult = .failed(String(localized: "Could not connect to \(bridgeIPToTest). Check that the bridge is powered on and connected to the same network."))
-                }
+            let ip = bridgeIPToTest
+            // A bridge found by the scan was verified moments ago; check again
+            // anyway, since a manually entered address was not.
+            switch await discovery.verifyManualIP(ip) {
+            case .bridge(let bridge):
+                settings.saveBridge(ip: bridge.ipAddress, addressing: bridge.addressing)
+                connectionTestResult = .success
+            case .notADRUBridge:
+                unverifiedIP = ip
+                connectionTestResult = .failed(String(localized: "The device at \(ip) answers, but not like a DRU bridge. Check the address, and make sure the fireplace is powered on."))
+            case .unreachable:
+                connectionTestResult = .failed(String(localized: "Could not connect to \(ip). Check that the bridge is powered on and connected to the same network."))
             }
         }
     }

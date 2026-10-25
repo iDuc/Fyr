@@ -90,6 +90,13 @@ final class SettingsStore {
         #endif
     }
 
+    /// Save a bridge verified by `DRUDiscovery`, with the addressing convention
+    /// it answered to.
+    func saveBridge(ip: String, addressing: DRUAddressing) {
+        bridgeIP = ip
+        store.set(addressing.rawValue, forKey: Keys.modbusAddressing)
+    }
+
     /// Last known status, persisted by `DRUFireplaceService` after every fetch.
     func loadSnapshot() -> FireplaceSnapshot? {
         FireplaceSnapshot.load(from: store)

@@ -96,12 +96,14 @@ struct FyrWidgetEntryView: View {
             // Flame height (when on)
             if entry.isOn {
                 HStack(spacing: 6) {
-                    Image(systemName: "flame")
-                        .foregroundStyle(flameOrange)
+                    if entry.flameHeightIsKnown {
+                        Image(systemName: "flame")
+                            .foregroundStyle(flameOrange)
 
-                    Text("\(entry.flameHeight)%")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
+                        Text("\(entry.flameHeight)%")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
 
                     // Eco mode badge
                     if entry.ecoModeActive {
@@ -123,9 +125,11 @@ struct FyrWidgetEntryView: View {
             Spacer()
 
             // Last updated
-            Text("Updated \(entry.date, style: .relative)")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
+            if let updatedAt = entry.updatedAt {
+                Text("Updated \(updatedAt, style: .relative)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
         }
     }
 

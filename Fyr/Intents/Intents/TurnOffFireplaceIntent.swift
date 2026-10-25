@@ -1,30 +1,19 @@
 import AppIntents
 
-/// Intent to turn off the fireplace
+/// Intent to turn off the fireplace. Always allowed, no confirmation.
 struct TurnOffFireplaceIntent: AppIntent {
 
-    static var title: LocalizedStringResource = "Turn Off Fireplace"
+    static let title: LocalizedStringResource = "Turn Off Fireplace"
 
-    static var description = IntentDescription("Turns off the DRU fireplace")
+    static let description = IntentDescription("Turns off the DRU fireplace")
 
-    static var openAppWhenRun: Bool = false
+    static let openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let service = DRUFireplaceService.shared
-        let isConnected = await service.isConnected
-        if !isConnected {
-            if let ip = SettingsStore.bridgeIPValue {
-                try await service.connect(to: ip)
-            } else {
-                return .result(dialog: "Please configure your fireplace in the Fyr app first.")
-            }
-        }
-
-        do {
-            try await service.turnOff()
-            return .result(dialog: "The fireplace is now off.")
-        } catch {
-            return .result(dialog: "Could not turn off the fireplace. Please check the connection.")
-        }
+        let dialog = await FireplaceIntentSupport.perform(
+            success: "The fireplace is now off.",
+            failure: String(localized: "Could not turn off the fireplace.")
+        ) { try await $0.turnOff() }
+        return .result(dialog: dialog)
     }
 }

@@ -20,11 +20,11 @@ enum EcoModeState: String, AppEnum {
 /// Intent to toggle eco/wave mode
 struct ToggleEcoModeIntent: AppIntent {
 
-    static var title: LocalizedStringResource = "Set Eco Mode"
+    static let title: LocalizedStringResource = "Set Eco Mode"
 
-    static var description = IntentDescription("Enables or disables eco mode on the DRU fireplace")
+    static let description = IntentDescription("Enables or disables eco mode on the DRU fireplace")
 
-    static var openAppWhenRun: Bool = false
+    static let openAppWhenRun: Bool = false
 
     /// Eco mode state - on or off
     @Parameter(
@@ -50,28 +50,13 @@ struct ToggleEcoModeIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let service = DRUFireplaceService.shared
-        let isConnected = await service.isConnected
-        if !isConnected {
-            if let ip = SettingsStore.bridgeIPValue {
-                try await service.connect(to: ip)
-            } else {
-                return .result(dialog: "Please configure your fireplace in the Fyr app first.")
-            }
-        }
-
         let enable = state == .on
-
-        do {
-            try await service.setEcoMode(enabled: enable)
-
-            if enable {
-                return .result(dialog: "Eco mode is now on. The flame will vary to save energy.")
-            } else {
-                return .result(dialog: "Eco mode is now off.")
-            }
-        } catch {
-            return .result(dialog: "Could not change eco mode. Please check the connection.")
-        }
+        let dialog = await FireplaceIntentSupport.perform(
+            success: enable
+                ? "Eco mode is now on. The flame will vary to save energy."
+                : "Eco mode is now off.",
+            failure: String(localized: "Could not change eco mode.")
+        ) { try await $0.setWaveMode(enabled: enable) }
+        return .result(dialog: dialog)
     }
 }

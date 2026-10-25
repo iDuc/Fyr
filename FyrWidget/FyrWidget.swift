@@ -30,7 +30,7 @@ struct WidgetBackgroundGradient: View {
 
 /// Fireplace status widget
 struct FyrWidget: Widget {
-    let kind: String = "FyrWidget"
+    let kind: String = FyrAppGroup.widgetKind
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: FireplaceTimelineProvider()) { entry in
@@ -55,13 +55,17 @@ struct FireplaceEntry: TimelineEntry {
     let temperature: Double
     let ecoModeActive: Bool
     let isConnected: Bool
+    /// When the bridge last confirmed this state
+    var updatedAt: Date?
+    /// Whether `flameHeight` was set by Fyr (the bridge cannot report it)
+    var flameHeightIsKnown = true
 
     /// Preview entry for widget gallery
     static var placeholder: FireplaceEntry {
         FireplaceEntry(
             date: Date(),
             isOn: true,
-            flameHeight: 10,
+            flameHeight: 60,
             temperature: 21.5,
             ecoModeActive: false,
             isConnected: true

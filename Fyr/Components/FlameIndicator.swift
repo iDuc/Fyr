@@ -251,13 +251,16 @@ struct FlameIndicator: View {
         // Eco mode breathing: scale 0.95-1.0 over 2-second cycle
         breathingTimer?.invalidate()
         breathingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-            let time = Date().timeIntervalSince1970
-            let phase = time.truncatingRemainder(dividingBy: FyrDesign.Animation.breathing)
-            let normalizedPhase = phase / FyrDesign.Animation.breathing
+            // Scheduled on the main run loop.
+            MainActor.assumeIsolated {
+                let time = Date().timeIntervalSince1970
+                let phase = time.truncatingRemainder(dividingBy: FyrDesign.Animation.breathing)
+                let normalizedPhase = phase / FyrDesign.Animation.breathing
 
-            // Smooth sine wave: oscillates between 0.95 and 1.0
-            withAnimation(.linear(duration: 0.05)) {
-                breathingScale = 0.97 + 0.03 * sin(normalizedPhase * .pi * 2)
+                // Smooth sine wave: oscillates between 0.95 and 1.0
+                withAnimation(.linear(duration: 0.05)) {
+                    breathingScale = 0.97 + 0.03 * sin(normalizedPhase * .pi * 2)
+                }
             }
         }
     }

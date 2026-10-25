@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import os
 
 /// Main dashboard view for controlling the fireplace
 /// Features iOS 26 liquid glass design with animated backgrounds
@@ -7,11 +9,8 @@ struct DashboardView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var flameHeight: Double = 8
+    @State private var flameHeight = Double(DRUConstants.defaultFlameHeight)
     @State private var targetTemperature: Double = 21
-
-    /// Polling timer for status updates
-    @State private var statusTask: Task<Void, Never>?
 
     /// Track consecutive failures for exponential backoff
     @State private var consecutiveFailures: Int = 0
@@ -22,8 +21,10 @@ struct DashboardView: View {
     /// Last known fireplace on/off state for stability detection
     @State private var lastKnownIsOn: Bool?
 
-    /// Last known flame height for stability detection
-    @State private var lastKnownFlameHeight: Int?
+    /// Last known wave mode for stability detection
+    @State private var lastKnownWaveMode: Bool?
+
+    private let logger = Logger(subsystem: "com.vanYperen.Fyr", category: "Dashboard")
 
     // MARK: - Polling Configuration
 
@@ -41,9 +42,6 @@ struct DashboardView: View {
 
     /// Number of stable polls before increasing interval
     private let stableThreshold: Int = 4
-
-    /// Command timeout in seconds
-    private let commandTimeout: Double = 30.0
 
     var body: some View {
         NavigationStack {
@@ -87,16 +85,13 @@ struct DashboardView: View {
                 }
             }
             .refreshable {
-                await refreshStatus()
+                await refreshStatus(priority: .userInitiated)
             }
-            .task {
-                await startPolling()
+            .task(id: scenePhase) {
+                await runSession(for: scenePhase)
             }
-            .onDisappear {
-                statusTask?.cancel()
-            }
-            .onChange(of: scenePhase) { oldPhase, newPhase in
-                handleScenePhaseChange(from: oldPhase, to: newPhase)
+            .onAppear {
+                targetTemperature = settings.targetTemperature
             }
         }
     }
@@ -117,6 +112,10 @@ struct DashboardView: View {
 
             // Quick stats row
             quickStatsRow
+
+            if let error = fireplace.lastError {
+                errorMessage(for: error)
+            }
 
             // Ignition slider
             IgnitionSlider(
@@ -159,6 +158,23 @@ struct DashboardView: View {
             // Connection indicator
             connectionIndicator
         }
+    }
+
+    @ViewBuilder
+    private func errorMessage(for error: BridgeError) -> some View {
+        VStack(spacing: FyrDesign.Spacing.xxs) {
+            Text(error.localizedDescription)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FyrDesign.Colors.textPrimary)
+            if let suggestion = error.recoverySuggestion {
+                Text(suggestion)
+                    .font(.caption)
+                    .foregroundStyle(FyrDesign.Colors.textSecondary)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, FyrDesign.Spacing.xl)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -246,18 +262,22 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var ecoModeToggle: some View {
-        @Bindable var fp = fireplace
+        let isOn = fireplace.displayedWaveMode
+        let binding = Binding(
+            get: { fireplace.displayedWaveMode },
+            set: { newValue in Task { await setWaveMode(newValue) } }
+        )
 
-        Toggle(isOn: $fp.targetEcoMode) {
+        Toggle(isOn: binding) {
             HStack(spacing: FyrDesign.Spacing.sm) {
                 ZStack {
                     Circle()
                         .fill(FyrDesign.Colors.ecoGreenSubtle)
                         .frame(width: 36, height: 36)
 
-                    Image(systemName: fp.targetEcoMode ? "leaf.fill" : "leaf")
+                    Image(systemName: isOn ? "leaf.fill" : "leaf")
                         .foregroundStyle(FyrDesign.Colors.ecoGreen)
-                        .symbolEffect(.bounce, value: fp.targetEcoMode)
+                        .symbolEffect(.bounce, value: isOn)
                 }
 
                 VStack(alignment: .leading, spacing: FyrDesign.Spacing.xxs) {
@@ -272,179 +292,140 @@ struct DashboardView: View {
             }
         }
         .tint(FyrDesign.Colors.ecoGreen)
-        .onChange(of: fp.targetEcoMode) { _, newValue in
-            Task {
-                await setEcoMode(newValue)
-            }
-        }
+        .disabled(fireplace.pendingWaveMode != nil)
     }
 
     // MARK: - Actions
 
-    /// Execute a command with timeout protection and automatic status refresh
-    private func executeCommand(_ command: @escaping () async throws -> Void) async {
+    private var service: DRUFireplaceService { .shared }
+
+    /// Run a user command, then refresh the status. Errors are shown in the dashboard.
+    private func executeCommand(_ command: @escaping @Sendable () async throws(BridgeError) -> Void) async {
         fireplace.isProcessing = true
         defer { fireplace.isProcessing = false }
 
         do {
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    try await command()
-                }
-                group.addTask { [commandTimeout] in
-                    try await Task.sleep(for: .seconds(commandTimeout))
-                    throw DRUServiceError.commandThrottled
-                }
-                try await group.next()
-                group.cancelAll()
-            }
-            await refreshStatus()
+            try await command()
+            fireplace.lastError = nil
+            await refreshStatus(priority: .userInitiated)
         } catch {
-            fireplace.connectionError = error
-            if case DRUServiceError.notConnected = error {
-                fireplace.connectionState = .reconnecting
-            }
+            handle(error)
         }
     }
 
     private func turnOn() async {
-        await executeCommand { try await DRUFireplaceService.shared.turnOn() }
+        await executeCommand { [service] () throws(BridgeError) in
+            try await service.turnOn(authorization: .appSlider)
+        }
     }
 
     private func turnOff() async {
-        await executeCommand { try await DRUFireplaceService.shared.turnOff() }
+        await executeCommand { [service] () throws(BridgeError) in
+            try await service.turnOff()
+        }
     }
 
     private func setFlameHeight(_ height: Int) async {
         do {
-            try await DRUFireplaceService.shared.setFlameHeight(height)
+            try await service.setFlameHeight(height)
+            fireplace.flameHeight = await service.lastSetFlameHeight ?? height
+            fireplace.flameHeightIsKnown = true
         } catch {
-            fireplace.connectionError = error
+            handle(error)
         }
     }
 
     private func setTemperature(_ temp: Double) async {
+        settings.targetTemperature = temp
         do {
-            try await DRUFireplaceService.shared.setThermostatSetpoint(temp)
+            try await service.setThermostatSetpoint(temp)
         } catch {
-            fireplace.connectionError = error
+            handle(error)
         }
     }
 
-    private func setEcoMode(_ enabled: Bool) async {
-        do {
-            try await DRUFireplaceService.shared.setEcoMode(enabled: enabled)
-        } catch {
-            fireplace.connectionError = error
+    private func setWaveMode(_ enabled: Bool) async {
+        fireplace.pendingWaveMode = enabled
+        await executeCommand { [service] () throws(BridgeError) in
+            try await service.setWaveMode(enabled: enabled)
+        }
+        if fireplace.lastError != nil {
+            fireplace.pendingWaveMode = nil
         }
     }
 
-    // MARK: - Status Polling
+    private func handle(_ error: BridgeError) {
+        guard error != .cancelled else { return }
+        logger.error("Bridge error: \(String(describing: error))")
+        fireplace.lastError = error
+        if error.isConnectionProblem {
+            fireplace.connectionState = .failed(error.localizedDescription)
+        }
+    }
 
-    private func startPolling() async {
-        print("[Dashboard] startPolling() called")
+    // MARK: - Connection lifecycle
 
-        // Connect to bridge
-        guard let bridgeIP = settings.bridgeIP else {
-            print("[Dashboard] No bridge IP configured")
+    /// Driven by `.task(id: scenePhase)`: polls while active, and releases the
+    /// bridge's single connection in the background so the DRU app can connect.
+    private func runSession(for phase: ScenePhase) async {
+        switch phase {
+        case .active:
+            await pollWhileActive()
+        case .background:
+            // Ask for background time: a suspended app would keep the socket
+            // open and block the bridge's only connection slot.
+            let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Release bridge connection")
+            logger.info("Background: releasing bridge connection")
+            await service.releaseConnection()
             fireplace.connectionState = .disconnected
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
+        default:
+            break
+        }
+    }
+
+    private func pollWhileActive() async {
+        if fireplace.lastStatusUpdate == nil, let snapshot = settings.loadSnapshot() {
+            fireplace.restore(from: snapshot)
+            flameHeight = Double(fireplace.flameHeight)
+        }
+
+        do {
+            try await service.configureFromSettings()
+        } catch {
+            fireplace.connectionState = .disconnected
+            fireplace.lastError = error
             return
         }
 
-        print("[Dashboard] Connecting to \(bridgeIP)...")
         fireplace.connectionState = .connecting
+        await refreshStatus(priority: .userInitiated)
 
-        do {
-            try await DRUFireplaceService.shared.connect(to: bridgeIP)
-            print("[Dashboard] Connection successful, fetching initial status...")
-            fireplace.connectionState = .connected
-
-            // Fetch initial status
-            await refreshStatus()
-
-            print("[Dashboard] Initial status fetch complete, starting polling loop")
-
-            // Start polling loop with adaptive intervals
-            statusTask = Task {
-                while !Task.isCancelled {
-                    let finalInterval = calculatePollingInterval()
-
-                    try? await Task.sleep(for: .seconds(finalInterval))
-
-                    // Skip polling if we're in the background
-                    guard scenePhase == .active else {
-                        print("[Dashboard] Skipping poll - app not active (phase: \(scenePhase))")
-                        continue
-                    }
-
-                    print("[Dashboard] Polling: refreshing status (interval: \(finalInterval)s, stable: \(stableStateCount), failures: \(consecutiveFailures), isOn: \(fireplace.isOn))...")
-                    await refreshStatus()
-                }
-            }
-        } catch {
-            print("[Dashboard] Connection failed: \(error.localizedDescription)")
-            fireplace.connectionState = .failed(error.localizedDescription)
-
-            // Retry connection after delay
-            Task {
-                try? await Task.sleep(for: .seconds(5))
-                if !Task.isCancelled {
-                    print("[Dashboard] Retrying connection...")
-                    await startPolling()
-                }
-            }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(calculatePollingInterval()))
+            guard !Task.isCancelled else { break }
+            await refreshStatus(priority: .automatic)
         }
     }
 
-    private func refreshStatus() async {
-        print("[Dashboard] refreshStatus() called")
+    private func refreshStatus(priority: DRUFireplaceService.Priority = .userInitiated) async {
         do {
-            let status = try await DRUFireplaceService.shared.fetchStatus()
-            print("[Dashboard] Status fetched successfully")
-
-            // Reset failure count on success
+            let status = try await service.fetchStatus(priority: priority)
             consecutiveFailures = 0
-
-            // Update connection state on success
-            if fireplace.connectionState != .connected {
-                fireplace.connectionState = .connected
-            }
-
+            fireplace.connectionState = .connected
             fireplace.update(from: status)
-
-            // Track stability for adaptive polling
             updateStabilityTracking()
-
-            // Sync UI state with fireplace state if we have a valid flame height
-            if status.flameHeight > 0 {
+            if status.flameHeightIsKnown {
                 flameHeight = Double(status.flameHeight)
             }
-
-            // Cache for widget
-            settings.cacheStatus(status)
-        } catch is CancellationError {
-            // Task was cancelled (e.g., navigation away from view)
-            // This is expected behavior, don't change connection state
-            print("[Dashboard] Status fetch cancelled (navigation)")
+        } catch .cancelled {
+            // View disappeared or app went to the background.
         } catch {
-            // Increment failure count for exponential backoff
             consecutiveFailures += 1
-            // Reset stability tracking on failures
             stableStateCount = 0
-            print("[Dashboard] Status fetch failed (consecutive failures: \(consecutiveFailures))")
-
-            // Handle actual connection errors
-            switch fireplace.connectionState {
-            case .connected:
-                fireplace.connectionState = .reconnecting
-            case .reconnecting:
-                // Already reconnecting, let it retry
-                break
-            default:
-                break
-            }
-
-            fireplace.connectionError = error
+            handle(error)
         }
     }
 
@@ -459,15 +440,8 @@ struct DashboardView: View {
             return addJitter(to: intervalWithBackoff)
         }
 
-        // Base interval depends on fireplace state
-        let baseInterval: Double
-        if fireplace.isOn {
-            // Fireplace is ON - poll more frequently
-            baseInterval = activePollingInterval
-        } else {
-            // Fireplace is OFF - poll less frequently
-            baseInterval = idlePollingInterval
-        }
+        // Poll more often while the fire is on
+        let baseInterval = fireplace.isOn ? activePollingInterval : idlePollingInterval
 
         // If state has been stable, gradually increase interval
         let stabilityMultiplier: Double
@@ -492,50 +466,16 @@ struct DashboardView: View {
     /// Update stability tracking after a status refresh
     private func updateStabilityTracking() {
         let currentIsOn = fireplace.isOn
-        let currentFlameHeight = fireplace.flameHeight
+        let currentWaveMode = fireplace.ecoModeActive
 
-        // Check if state has changed
-        if lastKnownIsOn != currentIsOn || lastKnownFlameHeight != currentFlameHeight {
-            // State changed - reset stability counter
+        if lastKnownIsOn != currentIsOn || lastKnownWaveMode != currentWaveMode {
             stableStateCount = 0
-            print("[Dashboard] State changed - resetting stability (isOn: \(lastKnownIsOn ?? false) -> \(currentIsOn), flame: \(lastKnownFlameHeight ?? 0) -> \(currentFlameHeight))")
         } else {
-            // State is stable - increment counter
             stableStateCount += 1
-            print("[Dashboard] State stable for \(stableStateCount) polls")
         }
 
-        // Update last known state
         lastKnownIsOn = currentIsOn
-        lastKnownFlameHeight = currentFlameHeight
-    }
-
-    /// Handle app moving between foreground and background
-    private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
-        print("[Dashboard] Scene phase changed: \(oldPhase) -> \(newPhase)")
-
-        switch newPhase {
-        case .active:
-            // App became active - refresh immediately if we were in background
-            if oldPhase == .background {
-                print("[Dashboard] Returning from background - refreshing status")
-                Task {
-                    await refreshStatus()
-                }
-            }
-
-        case .inactive:
-            // App is transitioning (e.g., Control Center opened)
-            // Keep polling but it will be skipped due to scenePhase check
-            break
-
-        case .background:
-            // App went to background - polling will be skipped automatically
-            print("[Dashboard] App went to background - polling paused")
-
-        @unknown default:
-            break
-        }
+        lastKnownWaveMode = currentWaveMode
     }
 }
 

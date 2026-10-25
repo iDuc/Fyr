@@ -1,730 +1,460 @@
 import Foundation
 import os
+import WidgetKit
 
-/// High-level service for controlling DRU fireplaces
-/// Handles rate limiting and translates high-level commands to Modbus operations
+/// How a request to light the fire was authorized.
+///
+/// Turning the fire *off* never needs one. Turning it *on* requires a value of
+/// this type, so every caller has to state where ignition came from. Phase 2
+/// (safety policy): Siri, Control Center and widgets may only create
+/// `.confirmedIntent` after the device is unlocked and the user confirmed.
+nonisolated enum IgnitionAuthorization: Sendable, Equatable {
+    /// The user completed the swipe-to-ignite slider in the app.
+    case appSlider
+    /// An App Intent that required an unlocked device and asked for confirmation.
+    case confirmedIntent
+    /// Fyr v1 behaviour: Siri/Shortcuts ignite without confirmation.
+    /// Temporary; phase 2 removes this case.
+    case unconfirmedIntent
+}
+
+/// Stores the last flame height Fyr set. Register 40201 is write-only, so this
+/// is the only record of it; it survives app restarts.
+nonisolated protocol FlameHeightStore: Sendable {
+    func load() -> Int?
+    func save(_ height: Int)
+}
+
+nonisolated struct AppGroupFlameHeightStore: FlameHeightStore {
+    static let key = "lastSetFlameHeight"
+
+    func load() -> Int? {
+        FyrAppGroup.defaults.object(forKey: Self.key) as? Int
+    }
+
+    func save(_ height: Int) {
+        FyrAppGroup.defaults.set(height, forKey: Self.key)
+    }
+}
+
+/// Controls one DRU fireplace through its Modbus TCP bridge.
+///
+/// This actor is the only owner of the bridge connection:
+/// - every request goes through one FIFO gate (connect, rate limit check and
+///   request are one atomic step, so a reconnect can never interleave with a
+///   command and rate limits cannot be bypassed by concurrent callers);
+/// - failed connects back off exponentially for automatic polling;
+/// - the connection is released after `idleTimeout` without requests, and on
+///   `releaseConnection()` (app background, end of an App Intent), because the
+///   bridge accepts only one connection and the DRU app must be able to connect.
 actor DRUFireplaceService {
-
-    // MARK: - Singleton
 
     static let shared = DRUFireplaceService()
 
-    // MARK: - Properties
-
-    private var modbusClient: ModbusTCPClient?
-    private let rateLimiter = RateLimiter()
-    private let logger = Logger(subsystem: "com.fyr.app", category: "DRUService")
-
-    private(set) var isConnected: Bool = false
-    private(set) var bridgeIP: String?
-
-    /// Current Modbus slave ID (loaded from settings)
-    private var currentSlaveId: UInt8 = 2
-
-    /// Current address offset (loaded from settings)
-    private var currentAddressOffset: Int = 0
-
-    /// Number of retry attempts for commands
-    private let maxRetries = 3
-
-    /// Flag to prevent concurrent reconnection attempts
-    private var isReconnecting: Bool = false
-
-    /// Flag to prevent concurrent status fetches
-    private var isFetchingStatus: Bool = false
-
-    /// Timestamp when isFetchingStatus was set to true (for timeout protection)
-    private var fetchStatusStartTime: Date?
-
-    /// Maximum time before isFetchingStatus auto-resets (prevents hung state)
-    private let fetchStatusTimeout: TimeInterval = 15.0
-
-    /// Delay between reconnection attempts to avoid overwhelming the bridge
-    private let reconnectionDelay: TimeInterval = 2.0
-
-    /// Command serialization - only one command can execute at a time
-    /// DRU bridge cannot handle concurrent Modbus operations
-    private var isExecutingCommand: Bool = false
-
-    /// Queue of pending operations waiting for command slot
-    private var pendingCommandContinuations: [CheckedContinuation<Void, Never>] = []
-
-    /// Delay after receiving Modbus Acknowledge (0x05) error before retry
-    private let acknowledgeRetryDelay: TimeInterval = 1.0
-
-    /// Flag to pause all operations during diagnostic scanning
-    /// When true, fetchStatus and reconnect will immediately return/throw
-    private(set) var scanningInProgress: Bool = false
-
-    /// Last set flame height (register 40201 is write-only, so we track locally)
-    private(set) var lastSetFlameHeight: Int = 0
-
-    // MARK: - Initialization
-
-    private init() {
-        logger.info("DRUFireplaceService initialized")
+    nonisolated struct Configuration: Sendable {
+        var unitId: UInt8 = DRUConstants.fireplaceUnitId
+        var addressing: DRUAddressing = .default
+        var client = ModbusTCPClient.Configuration()
+        var rateLimits: RateLimiter.Intervals = .production
+        /// Close the connection after this long without requests.
+        var idleTimeout: Duration = .seconds(30)
+        /// Pause between the individual register reads of one status fetch.
+        var registerReadGap: Duration = .milliseconds(100)
+        /// Reconnect backoff for automatic polling: base * 2^(failures-1), capped.
+        var reconnectBackoffBase: Duration = .seconds(2)
+        var reconnectBackoffMax: Duration = .seconds(60)
     }
 
-    // MARK: - Connection Management
+    typealias TransportFactory = @Sendable (BridgeEndpoint) -> any BridgeTransport
 
-    /// Configure and connect to the bridge
-    /// - Parameter ip: Bridge IP address
-    func connect(to ip: String) async throws {
-        // Load Modbus configuration from settings
-        currentSlaveId = SettingsStore.modbusSlaveIdValue
-        currentAddressOffset = SettingsStore.modbusAddressOffsetValue
-
-        logger.info("Using Modbus config: slaveId=\(self.currentSlaveId), addressOffset=\(self.currentAddressOffset)")
-
-        // Check if we're already connected to the same IP with same config
-        if let existingIP = bridgeIP, existingIP == ip, isConnected, let client = modbusClient {
-            let clientConnected = await client.isConnected
-            if clientConnected {
-                logger.debug("Already connected to \(ip), reusing existing connection")
-                return
-            }
-        }
-
-        logger.info("Connecting to bridge at \(ip)")
-        bridgeIP = ip
-
-        // Disconnect existing client if any
-        if modbusClient != nil {
-            await disconnect()
-        }
-
-        let client = ModbusTCPClient(
-            host: ip,
-            port: DRUConstants.modbusPort,
-            slaveId: currentSlaveId,
-            timeout: 5.0
-        )
-
-        try await client.connect()
-        modbusClient = client
-        isConnected = true
-        logger.info("Successfully connected to bridge")
+    /// Whether a request may wait for the reconnect backoff to expire.
+    nonisolated enum Priority: Sendable {
+        /// Something the user just asked for: always try to connect.
+        case userInitiated
+        /// Background polling: respect the reconnect backoff.
+        case automatic
     }
 
-    /// Update Modbus configuration and reconnect if needed
-    /// Called after diagnostic scan finds a working configuration
-    func updateConfiguration(slaveId: UInt8, addressOffset: Int) async throws {
-        logger.info("Updating Modbus config: slaveId=\(slaveId), addressOffset=\(addressOffset)")
+    // MARK: - State
 
-        currentSlaveId = slaveId
-        currentAddressOffset = addressOffset
+    private var configuration: Configuration
+    private let makeTransport: TransportFactory
+    private let flameHeightStore: FlameHeightStore
+    private let statusSink: @Sendable (FireplaceStatus, Int?) -> Void
+    private let rateLimiter: RateLimiter
+    private let logger = Logger(subsystem: "com.vanYperen.Fyr", category: "DRUService")
+    private let clock = ContinuousClock()
 
-        // Force reconnect with new configuration
-        if let ip = bridgeIP {
-            await disconnect()
-            try await Task.sleep(for: .milliseconds(500))
+    private(set) var endpoint: BridgeEndpoint?
+    private var client: ModbusTCPClient?
 
-            let client = ModbusTCPClient(
-                host: ip,
-                port: DRUConstants.modbusPort,
-                slaveId: currentSlaveId,
-                timeout: 5.0
-            )
+    private var gateHeld = false
+    /// FIFO per priority: user commands (e.g. turn off) go before queued polls.
+    private var gateWaiters: [GateWaiter] = []
 
-            try await client.connect()
-            modbusClient = client
-            isConnected = true
-            logger.info("Reconnected with new configuration")
-        }
+    private struct GateWaiter {
+        let priority: Priority
+        let continuation: CheckedContinuation<Void, Never>
     }
 
-    /// Disconnect from the bridge
-    func disconnect() async {
-        logger.info("Disconnecting from bridge")
-        if let client = modbusClient {
-            await client.disconnect()
-        }
-        modbusClient = nil
-        isConnected = false
+    private var consecutiveConnectFailures = 0
+    private var reconnectNotBefore: ContinuousClock.Instant?
+    private var lastConnectError: BridgeError?
+
+    private var idleTask: Task<Void, Never>?
+    private var activityGeneration = 0
+
+    /// Incremented by every flame height request; older pending requests yield.
+    private var flameHeightGeneration = 0
+
+    /// Last flame height set by Fyr (persisted), nil if never set.
+    private(set) var lastSetFlameHeight: Int?
+
+    // MARK: - Init
+
+    init(
+        configuration: Configuration = .init(),
+        flameHeightStore: FlameHeightStore = AppGroupFlameHeightStore(),
+        statusSink: @escaping @Sendable (FireplaceStatus, Int?) -> Void = DRUFireplaceService.saveSnapshot,
+        makeTransport: @escaping TransportFactory = { NWBridgeTransport(endpoint: $0) }
+    ) {
+        self.configuration = configuration
+        self.flameHeightStore = flameHeightStore
+        self.statusSink = statusSink
+        self.makeTransport = makeTransport
+        self.rateLimiter = RateLimiter(intervals: configuration.rateLimits)
+        self.lastSetFlameHeight = flameHeightStore.load()
     }
 
-    /// Start scanning mode - pauses all normal operations
-    /// Call this before running diagnostic scans
-    func startScanning() async {
-        logger.info("Starting scanning mode - pausing normal operations")
-        scanningInProgress = true
-        await disconnect()
-    }
+    // MARK: - Configuration & connection
 
-    /// Stop scanning mode - resumes normal operations
-    /// Call this after diagnostic scans complete
-    func stopScanning() {
-        logger.info("Stopping scanning mode - resuming normal operations")
-        scanningInProgress = false
-    }
-
-    // MARK: - Command Serialization
-
-    /// Acquire exclusive command slot - blocks until available
-    /// DRU bridge can only handle one Modbus operation at a time
-    private func acquireCommandSlot() async {
-        if !isExecutingCommand {
-            isExecutingCommand = true
-            logger.debug("Command slot acquired immediately")
+    /// Point the service at a bridge. Drops the current connection if the
+    /// address or Modbus settings change.
+    func configure(endpoint: BridgeEndpoint, unitId: UInt8? = nil, addressing: DRUAddressing? = nil) async {
+        let newUnitId = unitId ?? configuration.unitId
+        let newAddressing = addressing ?? configuration.addressing
+        guard endpoint != self.endpoint || newUnitId != configuration.unitId || newAddressing != configuration.addressing else {
             return
         }
-
-        // Wait for current command to complete
-        logger.debug("Command slot busy, waiting in queue...")
-        await withCheckedContinuation { continuation in
-            pendingCommandContinuations.append(continuation)
+        // Swap under the gate, so no queued request can connect to the old bridge meanwhile.
+        await enterGate(priority: .userInitiated)
+        defer { leaveGate() }
+        guard endpoint != self.endpoint || newUnitId != configuration.unitId || newAddressing != configuration.addressing else {
+            return
         }
-        isExecutingCommand = true
-        logger.debug("Command slot acquired from queue")
+        await closeClient()
+        self.endpoint = endpoint
+        configuration.unitId = newUnitId
+        configuration.addressing = newAddressing
+        client = nil
+        consecutiveConnectFailures = 0
+        reconnectNotBefore = nil
+        logger.info("Configured bridge \(endpoint.description), unit \(newUnitId), addressing \(newAddressing.rawValue)")
     }
 
-    /// Release command slot and wake next waiting command
-    private func releaseCommandSlot() {
-        isExecutingCommand = false
+    /// Configure from the saved settings (bridge address, unit id, addressing).
+    /// Throws `BridgeError.notConfigured` when no bridge has been set up.
+    func configureFromSettings() async throws(BridgeError) {
+        guard let endpoint = SettingsStore.bridgeEndpointValue else { throw .notConfigured }
+        await configure(endpoint: endpoint, unitId: SettingsStore.modbusUnitIdValue, addressing: SettingsStore.addressingValue)
+    }
 
-        if let next = pendingCommandContinuations.first {
-            pendingCommandContinuations.removeFirst()
-            logger.debug("Releasing command slot, waking next in queue (\(self.pendingCommandContinuations.count) remaining)")
-            next.resume()
-        } else {
-            logger.debug("Command slot released, queue empty")
+    /// Whether a connection is currently open.
+    var isConnected: Bool {
+        get async {
+            guard let client else { return false }
+            return await client.isConnected
         }
     }
 
-    /// Reconnect to the last known bridge
-    /// Thread-safe: prevents concurrent reconnection attempts
-    func reconnect() async throws {
-        // Don't reconnect during scanning
-        guard !scanningInProgress else {
-            logger.debug("Reconnect skipped: scanning in progress")
-            throw DRUServiceError.commandThrottled
-        }
-
-        guard let ip = bridgeIP else {
-            logger.error("Cannot reconnect: no bridge configured")
-            throw DRUServiceError.noBridgeConfigured
-        }
-
-        // Prevent concurrent reconnection attempts
-        guard !isReconnecting else {
-            logger.debug("Reconnection already in progress, waiting...")
-            // Wait for the ongoing reconnection to complete
-            try await Task.sleep(for: .seconds(reconnectionDelay))
-            // Check if we're now connected
-            if isConnected {
-                return
-            }
-            throw DRUServiceError.notConnected
-        }
-
-        isReconnecting = true
-        defer { isReconnecting = false }
-
-        logger.info("Reconnecting to \(ip)")
-
-        // Disconnect first and wait for cleanup
-        await disconnect()
-        try await Task.sleep(for: .milliseconds(500))
-
-        try await connect(to: ip)
-    }
-
-    /// Ensure we have an active connection, reconnecting if necessary
-    private func ensureConnected() async throws {
-        guard let client = modbusClient else {
-            if bridgeIP != nil {
-                try await reconnect()
-                return
-            }
-            throw DRUServiceError.notConnected
-        }
-
-        // Check if connection is still valid
-        let clientConnected = await client.isConnected
-        if !clientConnected {
-            logger.warning("Connection lost, attempting reconnect...")
-            try await reconnect()
-        }
+    /// Close the bridge connection now so other apps can connect. Waits for an
+    /// in-flight request. The next request reconnects automatically.
+    func releaseConnection() async {
+        idleTask?.cancel()
+        idleTask = nil
+        await enterGate(priority: .userInitiated)
+        defer { leaveGate() }
+        await closeClient()
     }
 
     // MARK: - Commands
 
-    /// Turn on the fireplace
-    func turnOn() async throws {
-        logger.info("Turning fireplace ON")
-        try await executeCommandWithRetry(.generalWrite) {
-            try await self.writeActionRegister(.mainBurner)
-        }
-        logger.info("Fireplace ON command sent successfully")
+    /// Light the fire. Requires an authorization, see `IgnitionAuthorization`.
+    func turnOn(authorization: IgnitionAuthorization) async throws(BridgeError) {
+        logger.info("Turn on (\(String(describing: authorization)))")
+        try await writeAction(.mainBurnerOn)
     }
 
-    /// Turn off the fireplace
-    func turnOff() async throws {
-        logger.info("Turning fireplace OFF")
-        try await executeCommandWithRetry(.generalWrite) {
-            try await self.writeActionRegister(.fireplaceOff)
-        }
-        logger.info("Fireplace OFF command sent successfully")
+    /// Turn the fire off. Always allowed.
+    func turnOff() async throws(BridgeError) {
+        logger.info("Turn off")
+        try await writeAction(.fireplaceOff)
     }
 
-    /// Set flame height
-    /// - Parameter height: Flame height percentage (0-100)
-    func setFlameHeight(_ height: Int) async throws {
-        let clampedHeight = max(DRUConstants.minFlameHeight, min(DRUConstants.maxFlameHeight, height))
-        logger.info("Setting flame height to \(clampedHeight)")
-
-        try await executeCommandWithRetry(.flameHeight) {
-            try await self.writeRegister(.flameHeightTarget, value: UInt16(clampedHeight))
-        }
-
-        // Track locally since register 40201 is write-only
-        lastSetFlameHeight = clampedHeight
+    /// Enable or disable wave (eco) mode.
+    func setWaveMode(enabled: Bool) async throws(BridgeError) {
+        try await writeAction(enabled ? .waveModeOn : .waveModeOff)
     }
 
-    /// Set thermostat setpoint
-    /// - Parameter temperature: Target temperature in °C (5-35)
-    func setThermostatSetpoint(_ temperature: Double) async throws {
-        let clampedTemp = max(DRUConstants.minTemperature, min(DRUConstants.maxTemperature, temperature))
-        let scaledValue = UInt16(clampedTemp * DRUConstants.temperatureScaleFactor)
-        logger.info("Setting thermostat to \(clampedTemp)°C")
+    /// Set the flame height (0-100 %). At most one change per 10 s is sent;
+    /// while waiting, a newer request replaces an older one ("latest wins").
+    /// - Returns: `false` if a newer request superseded this one.
+    @discardableResult
+    func setFlameHeight(_ height: Int) async throws(BridgeError) -> Bool {
+        let clamped = min(DRUConstants.maxFlameHeight, max(DRUConstants.minFlameHeight, height))
+        flameHeightGeneration += 1
+        let generation = flameHeightGeneration
+        let address = configuration.addressing.pduAddress(for: .flameHeightTarget)
 
-        try await executeCommandWithRetry(.generalWrite) {
-            try await self.writeRegister(.thermostatSetpoint, value: scaledValue)
+        // A retry (after a lost connection) still waits for its own 10 s slot.
+        let sent: Void? = try await perform(.flameHeight, priority: .userInitiated, attempts: 2,
+                                     shouldProceed: { self.flameHeightGeneration == generation }) { client in
+            try await client.writeSingleRegister(address: address, value: UInt16(clamped))
         }
+        guard sent != nil else {
+            logger.info("Flame height \(clamped) superseded by a newer request")
+            return false
+        }
+        lastSetFlameHeight = clamped
+        flameHeightStore.save(clamped)
+        return true
     }
 
-    /// Enable or disable eco/wave mode
-    /// - Parameter enabled: Whether eco mode should be enabled
-    func setEcoMode(enabled: Bool) async throws {
-        logger.info("Setting eco mode to \(enabled)")
-        try await executeCommandWithRetry(.generalWrite) {
-            // Use waveModeOn (105) to enable, waveModeOff (7) to disable
-            let action: DRUAction = enabled ? .waveModeOn : .waveModeOff
-            try await self.writeActionRegister(action)
-        }
+    /// Set the thermostat setpoint in °C.
+    func setThermostatSetpoint(_ temperature: Double) async throws(BridgeError) {
+        let clamped = min(DRUConstants.maxTemperature, max(DRUConstants.minTemperature, temperature))
+        let value = UInt16((clamped * DRUConstants.temperatureScaleFactor).rounded())
+        try await writeRegister(.thermostatSetpoint, value: value)
     }
 
-    /// Set wave interval for eco mode
-    /// - Parameter seconds: Interval in seconds (1-60)
-    func setWaveInterval(_ seconds: Int) async throws {
-        let clampedInterval = max(DRUConstants.minWaveInterval, min(DRUConstants.maxWaveInterval, seconds))
-        logger.info("Setting wave interval to \(clampedInterval)s")
+    /// Set the wave interval in seconds (1-60).
+    func setWaveInterval(_ seconds: Int) async throws(BridgeError) {
+        let clamped = min(DRUConstants.maxWaveInterval, max(DRUConstants.minWaveInterval, seconds))
+        try await writeRegister(.waveInterval, value: UInt16(clamped))
+    }
 
-        try await executeCommandWithRetry(.generalWrite) {
-            try await self.writeRegister(.waveInterval, value: UInt16(clampedInterval))
-        }
+    /// Time until a flame height change is allowed.
+    func flameHeightCooldown() async -> Duration {
+        await rateLimiter.remaining(.flameHeight)
     }
 
     // MARK: - Status
 
-    /// Fetch current fireplace status
-    /// - Returns: Current status
-    /// Note: DRU bridge has limited Modbus implementation - must read registers individually
-    func fetchStatus() async throws -> FireplaceStatus {
-        logger.info("fetchStatus() called")
+    /// Read the status registers.
+    func fetchStatus(priority: Priority = .userInitiated) async throws(BridgeError) -> FireplaceStatus {
+        let addressing = configuration.addressing
+        let gap = configuration.registerReadGap
+        let registers: [DRURegister] = [.status, .errorCode, .rssiGateway, .rssiFireplace, .temperature]
 
-        // Don't fetch during scanning
-        guard !scanningInProgress else {
-            logger.debug("Status fetch skipped: scanning in progress")
-            throw DRUServiceError.commandThrottled
-        }
-
-        // Prevent concurrent status fetches - DRU bridge only handles one request at a time
-        // Include timeout protection to prevent hung state
-        if isFetchingStatus {
-            // Check if the fetch has been running too long (timeout protection)
-            if let startTime = fetchStatusStartTime,
-               Date().timeIntervalSince(startTime) > fetchStatusTimeout {
-                logger.warning("isFetchingStatus timeout detected, resetting flag")
-                isFetchingStatus = false
-                fetchStatusStartTime = nil
-            } else {
-                logger.debug("Status fetch already in progress, skipping")
-                throw DRUServiceError.commandThrottled
+        // The DRU bridge is read one register at a time (as Fyr v1 and Node-RED do).
+        // The 3 s read limit applies to the whole status fetch.
+        let values = try await perform(.read, priority: priority, attempts: 2) { client in
+            var values: [DRURegister: UInt16] = [:]
+            for (index, register) in registers.enumerated() {
+                if index > 0 { try await Task.sleep(for: gap) }
+                let result = try await client.readHoldingRegisters(address: addressing.pduAddress(for: register), count: 1)
+                values[register] = result[0]
             }
-        }
+            return values
+        }!
 
-        isFetchingStatus = true
-        fetchStatusStartTime = Date()
-        defer {
-            isFetchingStatus = false
-            fetchStatusStartTime = nil
-        }
-
-        logger.debug("Ensuring connection before status fetch...")
-        try await ensureConnected()
-        logger.debug("Connection verified, proceeding with status fetch")
-
-        await rateLimiter.waitIfNeeded(for: .read)
-
-        // Serialize with other commands - DRU bridge can only handle one operation at a time
-        await acquireCommandSlot()
-        defer { releaseCommandSlot() }
-
-        logger.debug("Rate limiter cleared, starting register reads...")
-
-        // Read status registers individually (DRU bridge doesn't support batch reads)
-        var lastError: Error?
-        for attempt in 1...maxRetries {
-            // Get fresh client reference on each attempt (may change after reconnect)
-            guard let client = modbusClient else {
-                throw DRUServiceError.notConnected
-            }
-
-            do {
-                // Read each register individually with small delays
-                // This matches the Node-RED implementation which reads one register at a time
-                let statusReg = try await readSingleRegister(client: client, register: .status)
-                try await Task.sleep(for: .milliseconds(100))
-
-                let errorReg = try await readSingleRegister(client: client, register: .errorCode)
-                try await Task.sleep(for: .milliseconds(100))
-
-                _ = try await readSingleRegister(client: client, register: .rssiGateway)
-                try await Task.sleep(for: .milliseconds(100))
-
-                let rssiFireplaceReg = try await readSingleRegister(client: client, register: .rssiFireplace)
-                try await Task.sleep(for: .milliseconds(100))
-
-                let temperatureReg = try await readSingleRegister(client: client, register: .temperature)
-
-                await rateLimiter.recordExecution(of: .read)
-
-                // Status register 40203 contains bitfield status:
-                // - 15360 (0x3C00) = OFF
-                // - 47108 (0xB804) = ON, normal mode
-                // - 47620 (0xBA04) = ON, eco-wave mode (bit 9 set = 0x0200)
-                // Non-zero and not 15360 means ON
-                let statusCode = statusReg
-                let isOn = statusCode != 15360 && statusCode != 0
-
-                // Eco mode is indicated by bit 9 (0x0200) being set
-                let ecoModeActive = (statusCode & 0x0200) != 0
-
-                // RSSI values: multiply by -0.5 to get dBm
-                let rssiFireplace = Double(rssiFireplaceReg) * -0.5
-
-                let status = FireplaceStatus(
-                    isOn: isOn,
-                    ecoModeActive: ecoModeActive,
-                    temperatureControlActive: false, // Not available in basic status
-                    errorCode: FireplaceErrorCode.from(rawValue: errorReg),
-                    flameHeight: self.lastSetFlameHeight, // Flame height is write-only, track locally
-                    signalStrength: Int(rssiFireplace),
-                    currentTemperature: Double(temperatureReg) / DRUConstants.temperatureScaleFactor
-                )
-
-                logger.debug("Status fetched: isOn=\(status.isOn), statusCode=\(statusCode), temp=\(status.currentTemperature), rssi=\(rssiFireplace)dBm")
-                return status
-
-            } catch is CancellationError {
-                // Task was cancelled - propagate immediately without retry
-                logger.debug("Status fetch cancelled")
-                throw CancellationError()
-            } catch {
-                lastError = error
-                logger.warning("Status fetch attempt \(attempt) failed: \(error.localizedDescription)")
-
-                // Check if this is a Modbus Acknowledge (device busy) error
-                if isAcknowledgeError(error) && attempt < maxRetries {
-                    logger.info("Device busy (Acknowledge), waiting \(self.acknowledgeRetryDelay)s before retry...")
-                    try? await Task.sleep(for: .seconds(acknowledgeRetryDelay))
-                    continue
-                }
-
-                // Only retry with reconnection if error indicates connection problem
-                if attempt < maxRetries && errorRequiresReconnection(error) {
-                    logger.info("Connection error detected, attempting reconnect before retry...")
-                    do {
-                        try await reconnect()
-                    } catch {
-                        logger.error("Reconnection failed during status fetch: \(error.localizedDescription)")
-                    }
-                } else if attempt < maxRetries {
-                    // Protocol error - retry without reconnection, just a small delay
-                    logger.debug("Protocol error, retrying without reconnection...")
-                    try? await Task.sleep(for: .milliseconds(500))
-                }
-            }
-        }
-
-        logger.error("Status fetch failed after \(self.maxRetries) attempts")
-        throw lastError ?? DRUServiceError.notConnected
+        let status = FireplaceStatus(registers: values, lastSetFlameHeight: lastSetFlameHeight)
+        statusSink(status, lastSetFlameHeight)
+        return status
     }
 
-    /// Read a single register from the Modbus client
-    /// Applies the configured address offset automatically
-    private func readSingleRegister(client: ModbusTCPClient, register: DRURegister) async throws -> UInt16 {
-        let address = register.rawValue + UInt16(currentAddressOffset)
-        let values = try await client.readHoldingRegisters(
-            startAddress: address,
-            quantity: 1
+    // MARK: - Private: requests
+
+    private func writeAction(_ action: DRUAction) async throws(BridgeError) {
+        try await writeRegister(.action, value: action.rawValue)
+    }
+
+    private func writeRegister(_ register: DRURegister, value: UInt16) async throws(BridgeError) {
+        let address = configuration.addressing.pduAddress(for: register)
+        // Commands are idempotent (absolute values), so one retry after a lost
+        // connection is safe; it still waits for its own rate-limit slot.
+        _ = try await perform(.write, priority: .userInitiated, attempts: 2) { client in
+            try await client.writeSingleRegister(address: address, value: value)
+        }
+    }
+
+    /// Run one bridge request: gate -> connect -> rate-limit slot -> request.
+    /// - Parameter shouldProceed: checked before every attempt; returning false
+    ///   abandons the request (used to coalesce flame height changes).
+    /// - Returns: The result, or nil if `shouldProceed` returned false.
+    private func perform<T: Sendable>(
+        _ kind: RateLimiter.Kind,
+        priority: Priority,
+        attempts: Int,
+        shouldProceed: () -> Bool = { true },
+        _ request: @escaping @Sendable (ModbusTCPClient) async throws -> T
+    ) async throws(BridgeError) -> T? {
+        defer { scheduleIdleRelease() }
+        var attempt = 0
+
+        while true {
+            guard shouldProceed() else { return nil }
+
+            await enterGate(priority: priority)
+            guard shouldProceed() else { leaveGate(); return nil }
+
+            let client: ModbusTCPClient
+            do {
+                client = try await connectedClient(priority: priority)
+            } catch {
+                leaveGate()
+                throw error
+            }
+
+            // Connecting may have taken a while; a newer flame request may exist now.
+            guard shouldProceed() else { leaveGate(); return nil }
+
+            // Check the slot only now, right before sending, while holding the gate.
+            if let wait = await rateLimiter.tryAcquire(kind) {
+                leaveGate()
+                do {
+                    try await Task.sleep(for: wait)
+                } catch {
+                    throw .cancelled
+                }
+                continue
+            }
+
+            attempt += 1
+            do {
+                let result = try await request(client)
+                leaveGate()
+                return result
+            } catch {
+                let modbusError = (error as? ModbusError) ?? .connectionClosed
+                if modbusError.invalidatesConnection {
+                    await closeClient()
+                }
+                leaveGate()
+
+                if error is CancellationError || Task.isCancelled {
+                    throw .cancelled
+                }
+                let bridgeError = BridgeError(modbusError)
+                let retryable = bridgeError == .connectionLost || bridgeError == .deviceBusy || bridgeError == .noResponse
+                guard retryable, attempt < attempts else {
+                    logger.error("Request failed: \(modbusError.description)")
+                    throw bridgeError
+                }
+                logger.info("Retrying after \(modbusError.description)")
+            }
+        }
+    }
+
+    /// Returns a connected client. Call while holding the gate.
+    private func connectedClient(priority: Priority) async throws(BridgeError) -> ModbusTCPClient {
+        guard let endpoint else { throw .notConfigured }
+        if let client, await client.isConnected { return client }
+
+        if priority == .automatic, let notBefore = reconnectNotBefore, clock.now < notBefore {
+            throw lastConnectError ?? .unreachable
+        }
+
+        let client = self.client ?? ModbusTCPClient(
+            unitId: configuration.unitId,
+            configuration: configuration.client,
+            makeTransport: { [makeTransport] in makeTransport(endpoint) }
         )
-        guard let value = values.first else {
-            throw ModbusError.invalidResponse
-        }
-        return value
-    }
-
-    /// Check if a flame height change is currently allowed
-    /// - Returns: True if allowed, with time remaining if not
-    func canChangeFlameHeight() async -> (allowed: Bool, timeRemaining: TimeInterval) {
-        let canExecute = await rateLimiter.canExecute(.flameHeight)
-        let remaining = await rateLimiter.timeRemaining(for: .flameHeight)
-        return (canExecute, remaining)
-    }
-
-    // MARK: - Private Helpers
-
-    private func executeCommandWithRetry(_ type: RateLimiter.CommandType, _ command: @Sendable @escaping () async throws -> Void) async throws {
-        try await ensureConnected()
-
-        await rateLimiter.waitIfNeeded(for: type)
-
-        // Serialize commands - DRU bridge can only handle one at a time
-        await acquireCommandSlot()
-        defer { releaseCommandSlot() }
-
-        var lastError: Error?
-        for attempt in 1...maxRetries {
-            do {
-                try await command()
-                await rateLimiter.recordExecution(of: type)
-                return
-            } catch {
-                lastError = error
-                logger.warning("Command attempt \(attempt) failed: \(error.localizedDescription)")
-
-                // Check if this is a Modbus Acknowledge (device busy) error
-                if isAcknowledgeError(error) && attempt < maxRetries {
-                    logger.info("Device busy (Acknowledge), waiting \(self.acknowledgeRetryDelay)s before retry...")
-                    try? await Task.sleep(for: .seconds(acknowledgeRetryDelay))
-                    continue
-                }
-
-                // Only retry with reconnection if error indicates connection problem
-                if attempt < maxRetries && errorRequiresReconnection(error) {
-                    logger.info("Connection error detected, attempting reconnect before retry...")
-                    do {
-                        try await reconnect()
-                    } catch {
-                        logger.error("Reconnection failed during command retry: \(error.localizedDescription)")
-                    }
-                } else if attempt < maxRetries {
-                    // Protocol error - retry without reconnection, just a small delay
-                    logger.debug("Protocol error, retrying without reconnection...")
-                    try? await Task.sleep(for: .milliseconds(500))
-                }
+        self.client = client
+        do {
+            try await client.connect()
+            consecutiveConnectFailures = 0
+            reconnectNotBefore = nil
+            lastConnectError = nil
+            return client
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                throw .cancelled
             }
-        }
-
-        logger.error("Command failed after \(self.maxRetries) attempts")
-        throw lastError ?? DRUServiceError.notConnected
-    }
-
-    /// Check if error is a Modbus Acknowledge (0x05) - device busy
-    private nonisolated func isAcknowledgeError(_ error: Error) -> Bool {
-        if let modbusError = error as? ModbusError {
-            if case .modbusException(code: let code) = modbusError {
-                return code == 0x05  // Acknowledge - device busy
-            }
-        }
-        return false
-    }
-
-    private func writeActionRegister(_ action: DRUAction) async throws {
-        guard let client = modbusClient else {
-            throw DRUServiceError.notConnected
-        }
-
-        let address = DRURegister.action.rawValue + UInt16(currentAddressOffset)
-        try await client.writeSingleRegister(
-            address: address,
-            value: action.rawValue
-        )
-    }
-
-    private func writeRegister(_ register: DRURegister, value: UInt16) async throws {
-        guard let client = modbusClient else {
-            throw DRUServiceError.notConnected
-        }
-
-        let address = register.rawValue + UInt16(currentAddressOffset)
-        try await client.writeSingleRegister(address: address, value: value)
-    }
-
-    // MARK: - Diagnostics
-
-    /// Diagnostic result for register scanning
-    struct DiagnosticResult: Sendable {
-        let address: UInt16
-        let functionCode: UInt8
-        let success: Bool
-        let value: UInt16?
-        let errorMessage: String?
-    }
-
-    /// Run diagnostics to find valid register addresses
-    /// This helps debug "Illegal Data Address" errors by scanning multiple addresses
-    func runDiagnostics() async -> [DiagnosticResult] {
-        logger.info("Starting Modbus diagnostics...")
-
-        try? await ensureConnected()
-
-        guard let client = modbusClient else {
-            logger.error("Diagnostics failed: not connected")
-            return []
-        }
-
-        var results: [DiagnosticResult] = []
-
-        // Test addresses to try:
-        // IMPORTANT: DRU bridge expects RAW Modbus register numbers, NOT protocol addresses!
-        // Working implementations (Homey app) pass 40200 directly, NOT 199 (40200 - 40001).
-        // See: https://github.com/amstelzone/com.amstelzone.dru
-        let testAddresses: [UInt16] = [
-            // RAW register addresses (what DRU bridge actually expects)
-            40200,  // Action register (raw) - confirmed working in Homey app
-            40201,  // Flame height target (raw)
-            40203,  // Status register (raw) - confirmed working in Homey app
-            40204,  // Error code (raw)
-            40205,  // Gateway RSSI (raw)
-            40206,  // Fireplace RSSI (raw)
-            40207,  // Temperature (raw)
-            // Legacy addresses (for fallback testing with standard Modbus)
-            202,    // Legacy: 40203 - 40001
-            199,    // Legacy: 40200 - 40001
-        ]
-
-        // Try both holding registers (FC 0x03) and input registers (FC 0x04)
-        for address in testAddresses {
-            // Add delay between tests to not overwhelm the bridge
-            try? await Task.sleep(for: .milliseconds(200))
-
-            // Test with holding registers (FC 0x03)
-            logger.debug("Testing holding register at address \(address)")
-            do {
-                let values = try await client.readHoldingRegisters(startAddress: address, quantity: 1)
-                if let value = values.first {
-                    logger.info("SUCCESS: Holding register \(address) = \(value) (0x\(String(format: "%04X", value)))")
-                    results.append(DiagnosticResult(
-                        address: address,
-                        functionCode: 0x03,
-                        success: true,
-                        value: value,
-                        errorMessage: nil
-                    ))
-                }
-            } catch {
-                logger.debug("Holding register \(address) failed: \(error.localizedDescription)")
-                results.append(DiagnosticResult(
-                    address: address,
-                    functionCode: 0x03,
-                    success: false,
-                    value: nil,
-                    errorMessage: error.localizedDescription
-                ))
-            }
-
-            // Add delay before trying input registers
-            try? await Task.sleep(for: .milliseconds(200))
-
-            // Test with input registers (FC 0x04)
-            logger.debug("Testing input register at address \(address)")
-            do {
-                let values = try await client.readInputRegisters(startAddress: address, quantity: 1)
-                if let value = values.first {
-                    logger.info("SUCCESS: Input register \(address) = \(value) (0x\(String(format: "%04X", value)))")
-                    results.append(DiagnosticResult(
-                        address: address,
-                        functionCode: 0x04,
-                        success: true,
-                        value: value,
-                        errorMessage: nil
-                    ))
-                }
-            } catch {
-                logger.debug("Input register \(address) failed: \(error.localizedDescription)")
-                results.append(DiagnosticResult(
-                    address: address,
-                    functionCode: 0x04,
-                    success: false,
-                    value: nil,
-                    errorMessage: error.localizedDescription
-                ))
-            }
-        }
-
-        let successCount = results.filter { $0.success }.count
-        logger.info("Diagnostics complete: \(successCount)/\(results.count) successful")
-
-        return results
-    }
-}
-
-// MARK: - Service Errors
-
-enum DRUServiceError: Error, LocalizedError {
-    case notConnected
-    case noBridgeConfigured
-    case commandThrottled
-    case protocolError(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .notConnected:
-            return "Not connected to fireplace"
-        case .noBridgeConfigured:
-            return "No bridge IP configured"
-        case .commandThrottled:
-            return "Command rate limited, please wait"
-        case .protocolError(let message):
-            return "Communication error: \(message)"
+            let bridgeError = BridgeError((error as? ModbusError) ?? .connectFailed(.other(error.localizedDescription)))
+            consecutiveConnectFailures += 1
+            let backoff = min(
+                configuration.reconnectBackoffMax,
+                configuration.reconnectBackoffBase * (1 << min(consecutiveConnectFailures - 1, 10))
+            )
+            reconnectNotBefore = clock.now + backoff
+            lastConnectError = bridgeError
+            logger.error("Connect failed (\(self.consecutiveConnectFailures)x): \(String(describing: bridgeError)); backoff \(backoff)")
+            throw bridgeError
         }
     }
 
-    /// Returns true if this error indicates the connection is broken and needs reconnection
-    var requiresReconnection: Bool {
-        switch self {
-        case .notConnected:
-            return true
-        case .noBridgeConfigured, .commandThrottled, .protocolError:
-            return false
-        }
-    }
-}
-
-// MARK: - Error Classification
-
-/// Determines if an error requires reconnection or is just a protocol-level issue
-nonisolated func errorRequiresReconnection(_ error: Error) -> Bool {
-    // DRUServiceError has its own classification
-    if let serviceError = error as? DRUServiceError {
-        return serviceError.requiresReconnection
+    private func closeClient() async {
+        guard let client else { return }
+        await client.disconnect()
     }
 
-    // ModbusError classification
-    if let modbusError = error as? ModbusError {
-        switch modbusError {
-        case .connectionFailed, .connectionClosed, .notConnected, .timeout:
-            // Connection is broken - reconnection needed
-            return true
-        case .sendFailed, .receiveFailed:
-            // IO errors often indicate connection issues
-            return true
-        case .modbusException, .invalidResponse, .invalidResponseSize,
-             .unexpectedFunctionCode, .invalidByteCount:
-            // Protocol errors - connection is fine, data is wrong
-            // Reconnecting won't help
-            return false
+    // MARK: - Private: idle release
+
+    private func scheduleIdleRelease() {
+        activityGeneration += 1
+        let generation = activityGeneration
+        let timeout = configuration.idleTimeout
+        idleTask?.cancel()
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            await self?.releaseIfIdle(generation: generation)
         }
     }
 
-    // CancellationError doesn't require reconnection
-    if error is CancellationError {
-        return false
+    private func releaseIfIdle(generation: Int) async {
+        guard generation == activityGeneration, !gateHeld else { return }
+        logger.info("Idle: releasing bridge connection")
+        await enterGate(priority: .automatic)
+        defer { leaveGate() }
+        if generation == activityGeneration {
+            await closeClient()
+        }
     }
 
-    // Unknown errors - default to requiring reconnection
-    return true
+    // MARK: - Private: gate
+
+    private func enterGate(priority: Priority) async {
+        if !gateHeld {
+            gateHeld = true
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            enqueueGateWaiter(priority: priority, continuation: continuation)
+        }
+        // Ownership is handed over by `leaveGate`; `gateHeld` stays true.
+    }
+
+    private func enqueueGateWaiter(priority: Priority, continuation: CheckedContinuation<Void, Never>) {
+        let waiter = GateWaiter(priority: priority, continuation: continuation)
+        if priority == .userInitiated, let firstAutomatic = gateWaiters.firstIndex(where: { $0.priority == .automatic }) {
+            gateWaiters.insert(waiter, at: firstAutomatic)
+        } else {
+            gateWaiters.append(waiter)
+        }
+    }
+
+    private func leaveGate() {
+        if gateWaiters.isEmpty {
+            gateHeld = false
+        } else {
+            gateWaiters.removeFirst().continuation.resume()
+        }
+    }
+
+    // MARK: - Default status sink
+
+    /// Persist the status for the widget and a relaunched app, then reload widgets.
+    static let saveSnapshot: @Sendable (FireplaceStatus, Int?) -> Void = { status, lastSetFlameHeight in
+        FireplaceSnapshot(
+            isOn: status.isOn,
+            ecoModeActive: status.ecoModeActive,
+            lastSetFlameHeight: lastSetFlameHeight,
+            currentTemperature: status.currentTemperature,
+            errorCode: status.rawErrorCode == 0 ? nil : status.rawErrorCode,
+            timestamp: .now
+        ).save()
+        WidgetCenter.shared.reloadTimelines(ofKind: FyrAppGroup.widgetKind)
+    }
 }

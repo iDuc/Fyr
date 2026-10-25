@@ -81,7 +81,7 @@ actor DRUDiscovery {
     /// - Returns: Array of discovered bridges
     func scanNetwork(
         stopOnFirstFound: Bool = true,
-        progressHandler: ((DiscoveryProgress) -> Void)? = nil
+        progressHandler: (@Sendable (DiscoveryProgress) -> Void)? = nil
     ) async -> [DiscoveredBridge] {
         guard !isScanning else { return [] }
         isScanning = true
@@ -529,7 +529,7 @@ actor DRUDiscovery {
                         NI_NUMERICHOST
                     )
 
-                    let ip = String(cString: hostname)
+                    let ip = String(decoding: hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
                     // Return the base (first 3 octets)
                     let parts = ip.split(separator: ".")
                     if parts.count == 4 {

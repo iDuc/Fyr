@@ -4,28 +4,18 @@ import SwiftUI
 /// Intent to get the current fireplace status
 struct GetFireplaceStatusIntent: AppIntent {
 
-    static var title: LocalizedStringResource = "Get Fireplace Status"
+    static let title: LocalizedStringResource = "Get Fireplace Status"
 
-    static var description = IntentDescription("Shows the current status of the DRU fireplace")
+    static let description = IntentDescription("Shows the current status of the DRU fireplace")
 
-    static var openAppWhenRun: Bool = false
+    static let openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
         let service = DRUFireplaceService.shared
-        let isConnected = await service.isConnected
-        if !isConnected {
-            if let ip = SettingsStore.bridgeIPValue {
-                try await service.connect(to: ip)
-            } else {
-                return .result(
-                    dialog: "Please configure your fireplace in the Fyr app first.",
-                    view: StatusSnippetView(status: nil)
-                )
-            }
-        }
-
         do {
+            try await service.configureFromSettings()
             let status = try await service.fetchStatus()
+            await service.releaseConnection()
 
             // Build dialog text
             let dialogText: String
@@ -36,13 +26,15 @@ struct GetFireplaceStatusIntent: AppIntent {
                 let temp = Measurement(value: status.currentTemperature, unit: UnitTemperature.celsius)
                 let tempString = formatter.string(from: temp)
 
-                var text = "The fireplace is on at flame level \(status.flameHeight) with temperature \(tempString)."
+                var text = status.flameHeightIsKnown
+                    ? String(localized: "The fireplace is on at \(status.flameHeight) percent with temperature \(tempString).")
+                    : String(localized: "The fireplace is on with temperature \(tempString).")
                 if status.ecoModeActive {
-                    text += " Eco mode is active."
+                    text += " " + String(localized: "Eco mode is active.")
                 }
                 dialogText = text
             } else {
-                dialogText = "The fireplace is currently off."
+                dialogText = String(localized: "The fireplace is currently off.")
             }
 
             return .result(
@@ -50,8 +42,12 @@ struct GetFireplaceStatusIntent: AppIntent {
                 view: StatusSnippetView(status: status)
             )
         } catch {
+            await service.releaseConnection()
             return .result(
-                dialog: "Could not get the fireplace status. Please check the connection.",
+                dialog: FireplaceIntentSupport.dialog(
+                    for: error,
+                    failure: String(localized: "Could not get the fireplace status.")
+                ),
                 view: StatusSnippetView(status: nil)
             )
         }
@@ -78,7 +74,9 @@ struct StatusSnippetView: View {
 
                     if status.isOn {
                         HStack(spacing: 12) {
-                            Label("\(status.flameHeight)", systemImage: "flame")
+                            if status.flameHeightIsKnown {
+                                Label("\(status.flameHeight)%", systemImage: "flame")
+                            }
                             Label(formatTemperature(status.currentTemperature), systemImage: "thermometer.medium")
                         }
                         .font(.subheadline)

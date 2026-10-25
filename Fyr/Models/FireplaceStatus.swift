@@ -1,27 +1,80 @@
 import Foundation
 
 /// Current status snapshot from the fireplace
-struct FireplaceStatus: Sendable, Equatable {
+nonisolated struct FireplaceStatus: Sendable, Equatable {
     /// Whether the fireplace is currently on
     let isOn: Bool
 
     /// Whether eco/wave mode is active
     let ecoModeActive: Bool
 
-    /// Whether temperature control is active
+    /// Whether temperature control is active (not reported by the bridge)
     let temperatureControlActive: Bool
 
     /// Current error code, if any
     let errorCode: FireplaceErrorCode?
 
-    /// Current flame height percentage (0-100)
+    /// Last flame height set by Fyr (0-100 %). Register 40201 is write-only, so
+    /// this is not measured; see `flameHeightIsKnown`.
     let flameHeight: Int
 
-    /// DFGT signal strength (RSSI)
+    /// Whether Fyr has ever set a flame height (otherwise `flameHeight` is a default).
+    let flameHeightIsKnown: Bool
+
+    /// DFGT signal strength (RSSI, dBm)
     let signalStrength: Int
 
     /// Current measured temperature in °C
     let currentTemperature: Double
+
+    /// Raw status register 40203, for diagnostics.
+    let rawStatus: UInt16
+
+    /// Raw error code register 40204.
+    let rawErrorCode: UInt16
+
+    init(
+        isOn: Bool,
+        ecoModeActive: Bool,
+        temperatureControlActive: Bool,
+        errorCode: FireplaceErrorCode?,
+        flameHeight: Int,
+        flameHeightIsKnown: Bool = true,
+        signalStrength: Int,
+        currentTemperature: Double,
+        rawStatus: UInt16 = 0,
+        rawErrorCode: UInt16 = 0
+    ) {
+        self.isOn = isOn
+        self.ecoModeActive = ecoModeActive
+        self.temperatureControlActive = temperatureControlActive
+        self.errorCode = errorCode
+        self.flameHeight = flameHeight
+        self.flameHeightIsKnown = flameHeightIsKnown
+        self.signalStrength = signalStrength
+        self.currentTemperature = currentTemperature
+        self.rawStatus = rawStatus
+        self.rawErrorCode = rawErrorCode
+    }
+
+    /// Decode the status registers 40203-40207.
+    init(registers: [DRURegister: UInt16], lastSetFlameHeight: Int?) {
+        let statusWord = DRUStatusWord(rawValue: registers[.status] ?? 0)
+        let rawError = registers[.errorCode] ?? 0
+        self.init(
+            isOn: statusWord.isOn,
+            ecoModeActive: statusWord.waveModeActive,
+            temperatureControlActive: false,
+            errorCode: FireplaceErrorCode.from(rawValue: rawError),
+            flameHeight: lastSetFlameHeight ?? DRUConstants.defaultFlameHeight,
+            flameHeightIsKnown: lastSetFlameHeight != nil,
+            // RSSI register: multiply by -0.5 for dBm
+            signalStrength: Int(Double(registers[.rssiFireplace] ?? 0) * -0.5),
+            currentTemperature: Double(registers[.temperature] ?? 0) / DRUConstants.temperatureScaleFactor,
+            rawStatus: statusWord.rawValue,
+            rawErrorCode: rawError
+        )
+    }
 
     /// Whether the fireplace has an active error
     var hasError: Bool {
@@ -31,13 +84,7 @@ struct FireplaceStatus: Sendable, Equatable {
     /// Signal strength as a percentage (0-100)
     var signalStrengthPercentage: Int {
         // RSSI typically ranges from -100 (weak) to 0 (strong)
-        // Convert to percentage
         min(100, max(0, signalStrength + 100))
-    }
-
-    /// Flame height as a percentage (0-100)
-    var flameHeightPercentage: Double {
-        Double(flameHeight) / Double(DRUConstants.maxFlameHeight) * 100
     }
 }
 
@@ -51,7 +98,7 @@ extension FireplaceStatus {
             ecoModeActive: false,
             temperatureControlActive: true,
             errorCode: nil,
-            flameHeight: 10,
+            flameHeight: 60,
             signalStrength: -45,
             currentTemperature: 21.5
         )
@@ -90,7 +137,7 @@ extension FireplaceStatus {
             ecoModeActive: true,
             temperatureControlActive: true,
             errorCode: nil,
-            flameHeight: 8,
+            flameHeight: 50,
             signalStrength: -50,
             currentTemperature: 22.0
         )

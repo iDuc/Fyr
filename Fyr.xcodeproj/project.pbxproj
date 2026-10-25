@@ -20,6 +20,13 @@
 			remoteGlobalIDString = 799CBB8B2F1A4E3200C872A0;
 			remoteInfo = FyrWidgetExtension;
 		};
+		F1A000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 79668E2F2F190A560044031B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 79668E362F190A560044031B;
+			remoteInfo = Fyr;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -41,6 +48,7 @@
 		799CBB8C2F1A4E3200C872A0 /* FyrWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FyrWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		799CBB8E2F1A4E3200C872A0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		799CBB902F1A4E3200C872A0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		F1A000000000000000000003 /* FyrTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FyrTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		799CBBAF2F1A501E00C872A0 /* FyrWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FyrWidgetExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -68,6 +76,16 @@
 			path = FyrWidget;
 			sourceTree = "<group>";
 		};
+		F1A000000000000000000004 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F1A000000000000000000005 /* FyrTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FyrTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -87,6 +105,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F1A000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -96,6 +121,8 @@
 				799CBBAF2F1A501E00C872A0 /* FyrWidgetExtension.entitlements */,
 				79668E392F190A560044031B /* Fyr */,
 				799CBB922F1A4E3200C872A0 /* FyrWidget */,
+				F1A000000000000000000004 /* Shared */,
+				F1A000000000000000000005 /* FyrTests */,
 				799CBB8D2F1A4E3200C872A0 /* Frameworks */,
 				79668E382F190A560044031B /* Products */,
 			);
@@ -106,6 +133,7 @@
 			children = (
 				79668E372F190A560044031B /* Fyr.app */,
 				799CBB8C2F1A4E3200C872A0 /* FyrWidgetExtension.appex */,
+				F1A000000000000000000003 /* FyrTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -138,6 +166,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				79668E392F190A560044031B /* Fyr */,
+				F1A000000000000000000004 /* Shared */,
 			);
 			name = Fyr;
 			packageProductDependencies = (
@@ -160,6 +189,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				799CBB922F1A4E3200C872A0 /* FyrWidget */,
+				F1A000000000000000000004 /* Shared */,
 			);
 			name = FyrWidgetExtension;
 			packageProductDependencies = (
@@ -167,6 +197,29 @@
 			productName = FyrWidgetExtension;
 			productReference = 799CBB8C2F1A4E3200C872A0 /* FyrWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
+		};
+		F1A000000000000000000001 /* FyrTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1A00000000000000000000B /* Build configuration list for PBXNativeTarget "FyrTests" */;
+			buildPhases = (
+				F1A000000000000000000007 /* Sources */,
+				F1A000000000000000000006 /* Frameworks */,
+				F1A000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F1A00000000000000000000C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F1A000000000000000000005 /* FyrTests */,
+			);
+			name = FyrTests;
+			packageProductDependencies = (
+			);
+			productName = FyrTests;
+			productReference = F1A000000000000000000003 /* FyrTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -185,6 +238,10 @@
 								enabled = 1;
 							};
 						};
+					};
+					F1A000000000000000000001 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = 79668E362F190A560044031B;
 					};
 					799CBB8B2F1A4E3200C872A0 = {
 						CreatedOnToolsVersion = 26.2;
@@ -212,6 +269,7 @@
 			targets = (
 				79668E362F190A560044031B /* Fyr */,
 				799CBB8B2F1A4E3200C872A0 /* FyrWidgetExtension */,
+				F1A000000000000000000001 /* FyrTests */,
 			);
 		};
 /* End PBXProject section */
@@ -225,6 +283,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		799CBB8A2F1A4E3200C872A0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1A000000000000000000008 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -248,6 +313,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F1A000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -255,6 +327,11 @@
 			isa = PBXTargetDependency;
 			target = 799CBB8B2F1A4E3200C872A0 /* FyrWidgetExtension */;
 			targetProxy = 799CBB9E2F1A4E3300C872A0 /* PBXContainerItemProxy */;
+		};
+		F1A00000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 79668E362F190A560044031B /* Fyr */;
+			targetProxy = F1A000000000000000000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -312,7 +389,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -370,7 +447,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -409,7 +486,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -443,7 +520,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -459,7 +536,7 @@
 				DEVELOPMENT_TEAM = SZWSVWQSP3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FyrWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = FyrWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Fyr;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -474,7 +551,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -490,7 +567,7 @@
 				DEVELOPMENT_TEAM = SZWSVWQSP3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FyrWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = FyrWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Fyr;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -505,8 +582,48 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F1A000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SZWSVWQSP3;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vanYperen.FyrTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Fyr.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Fyr";
+			};
+			name = Debug;
+		};
+		F1A00000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SZWSVWQSP3;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vanYperen.FyrTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Fyr.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Fyr";
 			};
 			name = Release;
 		};
@@ -536,6 +653,15 @@
 			buildConfigurations = (
 				799CBBA32F1A4E3300C872A0 /* Debug */,
 				799CBBA42F1A4E3300C872A0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F1A00000000000000000000B /* Build configuration list for PBXNativeTarget "FyrTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1A000000000000000000009 /* Debug */,
+				F1A00000000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

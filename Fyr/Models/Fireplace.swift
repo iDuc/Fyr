@@ -11,8 +11,8 @@ final class Fireplace {
     /// Current connection state
     var connectionState: ConnectionState = .disconnected
 
-    /// Last connection error, if any
-    var connectionError: Error?
+    /// Last error from the bridge, shown to the user until the next success
+    var lastError: BridgeError?
 
     /// Configured bridge IP address
     var bridgeIP: String?
@@ -25,8 +25,11 @@ final class Fireplace {
     /// Current measured temperature in °C
     var currentTemperature: Double = 0
 
-    /// Current flame height percentage (0-100)
-    var flameHeight: Int = 0
+    /// Last flame height set by Fyr (0-100 %); the bridge cannot report it
+    var flameHeight: Int = DRUConstants.defaultFlameHeight
+
+    /// Whether `flameHeight` was actually set by Fyr (otherwise it is a default)
+    var flameHeightIsKnown: Bool = false
 
     /// Whether eco/wave mode is active
     var ecoModeActive: Bool = false
@@ -45,11 +48,9 @@ final class Fireplace {
     /// Target thermostat temperature
     var targetTemperature: Double = 21.0
 
-    /// Target flame height
-    var targetFlameHeight: Int = 8
-
-    /// Whether eco mode should be enabled
-    var targetEcoMode: Bool = false
+    /// Wave mode state the user just asked for, shown until the bridge
+    /// confirms it (or the request fails). Nil when nothing is pending.
+    var pendingWaveMode: Bool?
 
     // MARK: - UI State
 
@@ -77,6 +78,11 @@ final class Fireplace {
         connectionState == .connected && !hasError
     }
 
+    /// Wave mode as shown in the UI: the pending request, else the bridge state
+    var displayedWaveMode: Bool {
+        pendingWaveMode ?? ecoModeActive
+    }
+
     /// Formatted current temperature string
     var formattedTemperature: String {
         let measurement = Measurement(value: currentTemperature, unit: UnitTemperature.celsius)
@@ -97,11 +103,30 @@ final class Fireplace {
         isOn = status.isOn
         currentTemperature = status.currentTemperature
         flameHeight = status.flameHeight
+        flameHeightIsKnown = status.flameHeightIsKnown
         ecoModeActive = status.ecoModeActive
+        if pendingWaveMode == status.ecoModeActive {
+            pendingWaveMode = nil
+        }
         hasError = status.hasError
         errorCode = status.errorCode
         signalStrength = status.signalStrengthPercentage
         lastStatusUpdate = Date()
+        lastError = nil
+    }
+
+    /// Show the last known state from the app group until the first live status
+    func restore(from snapshot: FireplaceSnapshot) {
+        isOn = snapshot.isOn
+        ecoModeActive = snapshot.ecoModeActive
+        if let height = snapshot.lastSetFlameHeight {
+            flameHeight = height
+            flameHeightIsKnown = true
+        }
+        if let temperature = snapshot.currentTemperature {
+            currentTemperature = temperature
+        }
+        lastStatusUpdate = snapshot.timestamp
     }
 
     /// Clear error state
@@ -166,9 +191,9 @@ extension Fireplace {
         fireplace.bridgeIP = "192.168.1.100"
         fireplace.isOn = true
         fireplace.currentTemperature = 21.5
-        fireplace.flameHeight = 10
+        fireplace.flameHeight = 60
+        fireplace.flameHeightIsKnown = true
         fireplace.targetTemperature = 22.0
-        fireplace.targetFlameHeight = 10
         fireplace.signalStrength = 75
         return fireplace
     }

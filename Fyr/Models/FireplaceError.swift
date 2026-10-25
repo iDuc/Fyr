@@ -1,7 +1,7 @@
 import Foundation
 
 /// DRU fireplace error codes with user-friendly descriptions
-enum FireplaceErrorCode: String, CaseIterable, Sendable {
+nonisolated enum FireplaceErrorCode: String, CaseIterable, Sendable {
     case none = ""
     case f01 = "F01"    // Pilot flame failure
     case f02 = "F02"    // Main burner failure

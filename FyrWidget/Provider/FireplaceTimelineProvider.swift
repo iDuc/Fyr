@@ -1,6 +1,11 @@
 import WidgetKit
 
-/// Timeline provider for fireplace widget
+/// Timeline provider for the fireplace widget.
+///
+/// The widget never talks to the bridge (it has a single connection slot);
+/// it shows the snapshot the app saves in the app group after every status
+/// fetch. A snapshot older than `FireplaceSnapshot.freshness` is shown as
+/// "not connected" instead of as live state.
 struct FireplaceTimelineProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> FireplaceEntry {
@@ -8,57 +13,41 @@ struct FireplaceTimelineProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (FireplaceEntry) -> Void) {
-        // Return cached data for quick preview
-        if let cached = loadCachedStatus() {
-            completion(cached)
-        } else {
-            completion(FireplaceEntry.placeholder)
-        }
+        completion(context.isPreview ? .placeholder : Self.currentEntry(at: .now))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<FireplaceEntry>) -> Void) {
-        Task {
-            let entry = await fetchCurrentStatus()
+        let now = Date.now
+        var entries = [Self.currentEntry(at: now)]
 
-            // Refresh every 15 minutes (widget budget constraints)
-            let nextUpdate = Calendar.current.date(byAdding: .minute, value: 15, to: Date())!
-            let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
-            completion(timeline)
+        // Switch to "not connected" once the snapshot goes stale.
+        if let snapshot = FireplaceSnapshot.load(), snapshot.isFresh(at: now) {
+            let staleDate = snapshot.timestamp.addingTimeInterval(FireplaceSnapshot.freshness)
+            entries.append(Self.entry(for: snapshot, at: staleDate))
         }
+
+        // The app reloads the timeline after every status fetch; this is a fallback.
+        let nextUpdate = now.addingTimeInterval(30 * 60)
+        completion(Timeline(entries: entries, policy: .after(nextUpdate)))
     }
 
-    // MARK: - Private Methods
+    // MARK: - Entries
 
-    private func fetchCurrentStatus() async -> FireplaceEntry {
-        // Try to use App Group UserDefaults for cached data
-        guard let defaults = UserDefaults(suiteName: "group.com.fyr.app"),
-              let data = defaults.dictionary(forKey: "lastKnownStatus") else {
-            return FireplaceEntry.disconnected
-        }
-
-        return FireplaceEntry(
-            date: Date(),
-            isOn: data["isOn"] as? Bool ?? false,
-            flameHeight: data["flameHeight"] as? Int ?? 0,
-            temperature: data["currentTemperature"] as? Double ?? 0,
-            ecoModeActive: data["ecoModeActive"] as? Bool ?? false,
-            isConnected: true
-        )
+    static func currentEntry(at date: Date) -> FireplaceEntry {
+        guard let snapshot = FireplaceSnapshot.load() else { return .disconnected }
+        return entry(for: snapshot, at: date)
     }
 
-    private func loadCachedStatus() -> FireplaceEntry? {
-        guard let defaults = UserDefaults(suiteName: "group.com.fyr.app"),
-              let data = defaults.dictionary(forKey: "lastKnownStatus") else {
-            return nil
-        }
-
-        return FireplaceEntry(
-            date: Date(),
-            isOn: data["isOn"] as? Bool ?? false,
-            flameHeight: data["flameHeight"] as? Int ?? 0,
-            temperature: data["currentTemperature"] as? Double ?? 0,
-            ecoModeActive: data["ecoModeActive"] as? Bool ?? false,
-            isConnected: true
+    static func entry(for snapshot: FireplaceSnapshot, at date: Date) -> FireplaceEntry {
+        FireplaceEntry(
+            date: date,
+            isOn: snapshot.isOn,
+            flameHeight: snapshot.lastSetFlameHeight ?? 0,
+            temperature: snapshot.currentTemperature ?? 0,
+            ecoModeActive: snapshot.ecoModeActive,
+            isConnected: snapshot.isFresh(at: date),
+            updatedAt: snapshot.timestamp,
+            flameHeightIsKnown: snapshot.lastSetFlameHeight != nil
         )
     }
 }

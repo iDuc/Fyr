@@ -61,6 +61,19 @@ final class DashboardUITests: XCTestCase {
         XCTAssertEqual(result, .completed, "State is '\(stateLabel.label)', expected '\(text)'", file: file, line: line)
     }
 
+    /// On a phone or the closed iPhone Duo the controls can be below the
+    /// visible area; coordinate taps and slider adjustments need them on screen.
+    private func scrollIntoView(_ element: XCUIElement) {
+        let scrollView = app.scrollViews["dashboard.controlsPane"].exists
+            ? app.scrollViews["dashboard.controlsPane"]
+            : app.scrollViews.firstMatch
+        var attempts = 0
+        while !element.isHittable && attempts < 6 {
+            scrollView.swipeUp(velocity: .slow)
+            attempts += 1
+        }
+    }
+
     private func waitUntil(_ timeout: TimeInterval = 15, _ condition: () -> Bool) -> Bool {
         let deadline = Date.now.addingTimeInterval(timeout)
         while Date.now < deadline {
@@ -95,6 +108,7 @@ final class DashboardUITests: XCTestCase {
 
         let turnOff = app.buttons["dashboard.turnOff"]
         XCTAssertTrue(turnOff.waitForExistence(timeout: 5))
+        scrollIntoView(turnOff)
         turnOff.tap()
         waitForState("Off")
         XCTAssertEqual(bridge.writes.filter { $0.register == 40200 }.map(\.value), [101, 3])
@@ -109,6 +123,7 @@ final class DashboardUITests: XCTestCase {
         let wave = app.switches["dashboard.wave"]
         XCTAssertTrue(wave.waitForExistence(timeout: 5))
         XCTAssertEqual(wave.value as? String, "0")
+        scrollIntoView(wave)
 
         // The switch sits at the trailing edge of the card; its label does not toggle.
         wave.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
@@ -132,7 +147,14 @@ final class DashboardUITests: XCTestCase {
 
         let slider = app.sliders["dashboard.flameHeight"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        scrollIntoView(slider)
         slider.adjust(toNormalizedSliderPosition: 0.8)
+        if (slider.value as? String) == "50%" {
+            // On some layouts adjust() leaves the slider alone; drag the thumb
+            // the way a finger does (from the middle to about 80 %).
+            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.2, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.5)))
+        }
 
         XCTAssertTrue(waitUntil(20) { self.bridge.writes.contains { $0.register == 40201 } },
                       "No flame height sent; slider shows \(slider.value as? String ?? "?")")
@@ -149,6 +171,7 @@ final class DashboardUITests: XCTestCase {
 
         let row = app.buttons["dashboard.thermostat"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        scrollIntoView(row)
         row.tap()
         XCTAssertTrue(app.steppers.firstMatch.waitForExistence(timeout: 5))
     }
